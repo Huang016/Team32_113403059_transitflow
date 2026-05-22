@@ -5,9 +5,11 @@ erDiagram
     %% ==========================================
     
     %% 基礎建設網絡關聯
-    NATIONAL_RAIL_STATIONS ||--o{ NATIONAL_RAIL_SCHEDULES : "starts at"
+    NATIONAL_RAIL_STATIONS ||--o{ NATIONAL_RAIL_SCHEDULES : "origin of"
+    NATIONAL_RAIL_STATIONS ||--o{ NATIONAL_RAIL_SCHEDULES : "destination of"
     NATIONAL_RAIL_SCHEDULES ||--|| NATIONAL_RAIL_SEAT_LAYOUTS : "defines template for"
-    METRO_STATIONS ||--o{ METRO_SCHEDULES : "starts at"
+    METRO_STATIONS ||--o{ METRO_SCHEDULES : "origin of"
+    METRO_STATIONS ||--o{ METRO_SCHEDULES : "destination of"
 
     %% 使用者與交易核心關聯
     REGISTERED_USERS ||--o{ BOOKINGS : "places"
@@ -22,11 +24,14 @@ erDiagram
     METRO_STATIONS ||--o{ METRO_TRAVEL_HISTORY : "exits to"
 
     %% 付款與回饋
-    BOOKINGS ||--|| PAYMENTS : "has"
-    METRO_TRAVEL_HISTORY ||--|| PAYMENTS : "has"
-    BOOKINGS ||--o| FEEDBACK : "receives"
-    METRO_TRAVEL_HISTORY ||--o| FEEDBACK : "receives"
-    REGISTERED_USERS ||--o{ FEEDBACK : "writes"
+    BOOKINGS ||--|| RAIL_PAYMENTS : "has"
+    METRO_TRAVEL_HISTORY ||--|| METRO_PAYMENTS : "has"
+
+    BOOKINGS ||--o| RAIL_FEEDBACK : "receives"
+    METRO_TRAVEL_HISTORY ||--o| METRO_FEEDBACK : "receives"
+
+    REGISTERED_USERS ||--o{ RAIL_FEEDBACK : "writes"
+    REGISTERED_USERS ||--o{ METRO_FEEDBACK : "writes"
 
     %% ==========================================
     %% 2. 實體欄位定義 (Entities)
@@ -36,11 +41,11 @@ erDiagram
         string user_id PK
         string full_name
         string email
-        string password
+        string password_hash
         string phone
         date date_of_birth
         string secret_question
-        string secret_answer
+        string secret_answer_hash
         timestamp registered_at
         boolean is_active
     }
@@ -52,7 +57,7 @@ erDiagram
         boolean is_interchange_national_rail
         string_array interchange_national_rail_lines
         boolean is_interchange_metro
-        string interchange_metro_station_id
+        string interchange_metro_station_id FK
     }
 
     METRO_STATIONS {
@@ -62,7 +67,7 @@ erDiagram
         boolean is_interchange_metro
         string_array interchange_metro_lines
         boolean is_interchange_national_rail
-        string interchange_national_rail_station_id
+        string interchange_national_rail_station_id FK
     }
 
     NATIONAL_RAIL_SCHEDULES {
@@ -70,12 +75,12 @@ erDiagram
         string line
         string service_type
         string direction
-        string origin_station_id
-        string destination_station_id
+        string origin_station_id FK
+        string destination_station_id FK
         string_array stops_in_order
         string_array passed_through_stations
-        string first_train_time
-        string last_train_time
+        time first_train_time
+        time last_train_time
         jsonb travel_time_from_origin_min
         jsonb fare_classes
         int frequency_min
@@ -86,11 +91,11 @@ erDiagram
         string schedule_id PK
         string line
         string direction
-        string origin_station_id
-        string destination_station_id
+        string origin_station_id FK
+        string destination_station_id FK
         string_array stops_in_order
-        string first_train_time
-        string last_train_time
+        time first_train_time
+        time last_train_time
         jsonb travel_time_from_origin_min
         decimal base_fare_usd
         decimal per_stop_rate_usd
@@ -100,18 +105,18 @@ erDiagram
 
     NATIONAL_RAIL_SEAT_LAYOUTS {
         string layout_id PK
-        string schedule_id
+        string schedule_id FK
         jsonb coaches
     }
 
     BOOKINGS {
         string booking_id PK
-        string user_id
-        string schedule_id
-        string origin_station_id
-        string destination_station_id
+        string user_id FK
+        string schedule_id FK
+        string origin_station_id FK
+        string destination_station_id FK
         date travel_date
-        string departure_time
+        time departure_time
         string ticket_type
         string fare_class
         string coach
@@ -125,10 +130,10 @@ erDiagram
 
     METRO_TRAVEL_HISTORY {
         string trip_id PK
-        string user_id
-        string schedule_id
-        string origin_station_id
-        string destination_station_id
+        string user_id FK
+        string schedule_id FK
+        string origin_station_id FK
+        string destination_station_id FK
         date travel_date
         string ticket_type
         string day_pass_ref
@@ -139,19 +144,37 @@ erDiagram
         timestamp travelled_at
     }
 
-    PAYMENTS {
+
+    RAIL_PAYMENTS {
         string payment_id PK
-        string booking_id
+        string booking_id FK
         decimal amount_usd
         string method
         string status
         timestamp paid_at
     }
 
-    FEEDBACK {
+    METRO_PAYMENTS {
+        string payment_id PK
+        string trip_id FK
+        decimal amount_usd
+        string method
+        string status
+        timestamp paid_at
+    }
+    RAIL_FEEDBACK {
         string feedback_id PK
-        string booking_id
-        string user_id
+        string booking_id FK
+        string user_id FK
+        int rating
+        string comment
+        timestamp submitted_at
+    }
+
+    METRO_FEEDBACK {
+        string feedback_id PK
+        string trip_id FK
+        string user_id FK
         int rating
         string comment
         timestamp submitted_at
