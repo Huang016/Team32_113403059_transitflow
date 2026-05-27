@@ -207,17 +207,32 @@ CREATE TABLE policy_documents (
   FILL THIS IN after your team agrees on Neo4j node labels and
   relationship types.
   ============================================================ -->
+## Agreed Graph Schema
 
-```
 Node labels:
-- TODO
+- `Station`: 統一的車站節點（包含捷運與國鐵）。
+  - 可搭配屬性 `network` 來區分系統，確保 `query_delay_ripple` 能跨系統計算 N 跳（Hops）影響範圍。
 
 Relationship types:
-- TODO
+- `CONNECTS_TO`: 同一路線相鄰車站之間的運行連線。
+- `INTERCHANGE_TO`: 捷運站與國鐵站之間的實體轉乘通道（如 Central Square `MS01` ⇄ Central Station `NR01`）。
 
 Key properties:
-- TODO
-```
+- `Station` 屬性：
+  - `station_id` (String, 主鍵唯一約束，例如 "MS01", "NR01")
+  - `name` (String, 車站名稱)
+  - `network` (String, 系統類別: "metro" 或 "rail")
+  - `lines` (List of Strings, 該站停靠的路線清單，例如 ["M1", "M2"])
+- `CONNECTS_TO` 屬性（用於 Dijkstra 權重計算）：
+  - `line` (String, 路線名稱，如 "M1", "NR1")
+  - `service_type` (String, 服務類型: "normal" 或 "express")
+  - `travel_time_min` (Float/Integer, 站間行駛時間 ── 最快路徑權重)
+  - `fare_standard` (Float, 標準艙/捷運每跨一站的費率 ── 最便宜路徑權重)
+  - `fare_first` (Float, 頭等艙每跨一站的費率，國鐵專用)
+- `INTERCHANGE_TO` 屬性：
+  - `travel_time_min` (Float, 轉乘步行時間，預設為 0)
+  - `fare` (Float, 轉乘本身費用，固定為 0.0)
+
 
 ## Function Signatures We Are Implementing
 
