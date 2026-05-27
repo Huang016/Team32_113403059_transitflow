@@ -52,7 +52,154 @@ TransitFlow is a Python-based AI chat assistant for a fictional transit operator
 
 ```sql
 -- TODO: paste your final schema.sql contents here after team review
-```
+```## Agreed Relational Schema
+
+```sql
+-- 使用者帳號管理
+CREATE TABLE registered_users (
+    user_id VARCHAR PRIMARY KEY,
+    full_name VARCHAR NOT NULL,
+    email VARCHAR UNIQUE NOT NULL,
+    password_hash VARCHAR,
+    phone VARCHAR,
+    date_of_birth DATE,
+    secret_question VARCHAR,
+    secret_answer_hash VARCHAR,
+    registered_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    is_active BOOLEAN DEFAULT TRUE
+);
+
+-- 國家鐵路與捷運車站
+CREATE TABLE national_rail_stations (
+    station_id VARCHAR PRIMARY KEY,
+    name VARCHAR NOT NULL
+);
+
+CREATE TABLE metro_stations (
+    station_id VARCHAR PRIMARY KEY,
+    name VARCHAR NOT NULL,
+    interchange_national_rail_station_id VARCHAR REFERENCES national_rail_stations(station_id)
+);
+
+-- 國家鐵路時刻表與座位配置
+CREATE TABLE national_rail_schedules (
+    schedule_id VARCHAR PRIMARY KEY,
+    line VARCHAR,
+    service_type VARCHAR,
+    direction VARCHAR,
+    origin_station_id VARCHAR REFERENCES national_rail_stations(station_id),
+    destination_station_id VARCHAR REFERENCES national_rail_stations(station_id),
+    stops_in_order VARCHAR[] NOT NULL,
+    first_train_time TIME,
+    last_train_time TIME,
+    frequency_min INTEGER,
+    operates_on VARCHAR,
+    fare_classes JSONB -- 包含 base_fare_usd 與 per_stop_rate_usd
+);
+
+CREATE TABLE national_rail_seat_layouts (
+    schedule_id VARCHAR PRIMARY KEY REFERENCES national_rail_schedules(schedule_id),
+    coaches JSONB -- 包含 coach, fare_class, 以及 seats (seat_id, row, column)
+);
+
+-- 捷運時刻表
+CREATE TABLE metro_schedules (
+    schedule_id VARCHAR PRIMARY KEY,
+    line VARCHAR,
+    direction VARCHAR,
+    origin_station_id VARCHAR REFERENCES metro_stations(station_id),
+    destination_station_id VARCHAR REFERENCES metro_stations(station_id),
+    stops_in_order VARCHAR[] NOT NULL,
+    first_train_time TIME,
+    last_train_time TIME,
+    travel_time_from_origin_min INTEGER,
+    base_fare_usd NUMERIC(10, 2),
+    per_stop_rate_usd NUMERIC(10, 2),
+    frequency_min INTEGER,
+    operates_on VARCHAR
+);
+
+-- 國家鐵路訂票與紀錄
+CREATE TABLE bookings (
+    booking_id VARCHAR PRIMARY KEY,
+    user_id VARCHAR REFERENCES registered_users(user_id),
+    schedule_id VARCHAR REFERENCES national_rail_schedules(schedule_id),
+    origin_station_id VARCHAR REFERENCES national_rail_stations(station_id),
+    destination_station_id VARCHAR REFERENCES national_rail_stations(station_id),
+    travel_date DATE,
+    departure_time TIME,
+    ticket_type VARCHAR,
+    fare_class VARCHAR,
+    coach VARCHAR,
+    seat_id VARCHAR,
+    stops_travelled INTEGER,
+    amount_usd NUMERIC(10, 2),
+    status VARCHAR,
+    booked_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    travelled_at TIMESTAMP WITH TIME ZONE
+);
+
+CREATE TABLE rail_payments (
+    payment_id VARCHAR PRIMARY KEY,
+    booking_id VARCHAR REFERENCES bookings(booking_id),
+    amount_usd NUMERIC(10, 2),
+    method VARCHAR,
+    status VARCHAR,
+    paid_at TIMESTAMP WITH TIME ZONE
+);
+
+CREATE TABLE rail_feedback (
+    feedback_id VARCHAR PRIMARY KEY,
+    booking_id VARCHAR REFERENCES bookings(booking_id),
+    user_id VARCHAR REFERENCES registered_users(user_id),
+    rating INTEGER,
+    comment TEXT,
+    submitted_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 捷運乘車紀錄
+CREATE TABLE metro_travel_history (
+    trip_id VARCHAR PRIMARY KEY,
+    user_id VARCHAR REFERENCES registered_users(user_id),
+    schedule_id VARCHAR REFERENCES metro_schedules(schedule_id),
+    origin_station_id VARCHAR REFERENCES metro_stations(station_id),
+    destination_station_id VARCHAR REFERENCES metro_stations(station_id),
+    travel_date DATE,
+    ticket_type VARCHAR,
+    day_pass_ref VARCHAR,
+    stops_travelled INTEGER,
+    amount_usd NUMERIC(10, 2),
+    status VARCHAR,
+    purchased_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE metro_payments (
+    payment_id VARCHAR PRIMARY KEY,
+    trip_id VARCHAR REFERENCES metro_travel_history(trip_id),
+    amount_usd NUMERIC(10, 2),
+    method VARCHAR,
+    status VARCHAR,
+    paid_at TIMESTAMP WITH TIME ZONE
+);
+
+CREATE TABLE metro_feedback (
+    feedback_id VARCHAR PRIMARY KEY,
+    trip_id VARCHAR REFERENCES metro_travel_history(trip_id),
+    user_id VARCHAR REFERENCES registered_users(user_id),
+    rating INTEGER,
+    comment TEXT,
+    submitted_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- RAG 向量搜尋文件 (依循 pgvector 設定)
+CREATE TABLE policy_documents (
+    id SERIAL PRIMARY KEY,
+    title VARCHAR,
+    category VARCHAR,
+    content TEXT,
+    embedding VECTOR(768), -- 假設使用標準的 1536 維度，請依實際模型調整
+    source_file VARCHAR
+);
 
 ## Agreed Graph Schema
 
