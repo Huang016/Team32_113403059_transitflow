@@ -1,222 +1,244 @@
 -- ============================================================
---  TransitFlow PostgreSQL Schema
---  Seed data is loaded separately by: python skeleton/seed_postgres.py
---
---  TWO ROLES:
---     1. Relational  → dual-network transit data you design below
---     2. Vector      → policy documents for RAG (provided — do not modify)
+-- TransitFlow PostgreSQL Schema — full revised version
+-- Changes included:
+-- 1) registered_users.password -> password_hash with Argon2id format check
+-- 2) Removed circular FK constraints between metro_stations and national_rail_stations
+--    for interchange columns, so seed_postgres.py can load station JSON safely.
+-- 3) Added DROP TABLE IF EXISTS and CREATE INDEX IF NOT EXISTS so this file can be rerun.
+-- Seed data is loaded separately by: python skeleton/seed_postgres.py
 -- ============================================================
 
 -- ============================================================
---  STUDENT TASK — Design and create your relational tables here
+-- 0. Reset tables for repeatable schema execution
+-- ============================================================
+DROP TABLE IF EXISTS metro_feedback CASCADE;
+DROP TABLE IF EXISTS national_rail_feedback CASCADE;
+DROP TABLE IF EXISTS metro_payments CASCADE;
+DROP TABLE IF EXISTS national_rail_payments CASCADE;
+DROP TABLE IF EXISTS metro_trips CASCADE;
+DROP TABLE IF EXISTS national_rail_bookings CASCADE;
+DROP TABLE IF EXISTS national_rail_seats CASCADE;
+DROP TABLE IF EXISTS metro_schedules CASCADE;
+DROP TABLE IF EXISTS national_rail_schedules CASCADE;
+DROP TABLE IF EXISTS metro_stations CASCADE;
+DROP TABLE IF EXISTS national_rail_stations CASCADE;
+DROP TABLE IF EXISTS registered_users CASCADE;
+DROP TABLE IF EXISTS policy_documents CASCADE;
+
+-- ============================================================
+-- 1. Independent master tables
 -- ============================================================
 
--- =========================================================================
--- 1. 獨立主表 (無任何外鍵，必須最先建立)
--- =========================================================================
-
--- 使用者帳號表
--- ============================================================
---  TransitFlow PostgreSQL Schema
---  Seed data is loaded separately by: python skeleton/seed_postgres.py
--- ============================================================
-
--- =========================================================================
--- 1. 獨立主表 (無任何外鍵，必須最先建立)
--- =========================================================================
--- 使用者帳號表 (手冊命名為 users)
 CREATE TABLE registered_users (
-    user_id VARCHAR(10) PRIMARY KEY,
-    full_name VARCHAR(200) NOT NULL,
-    email VARCHAR(255) UNIQUE NOT NULL,
-    password_hash VARCHAR(60) NOT NULL, -- 預留 60 碼給 bcrypt
-    phone VARCHAR(20),
-    date_of_birth DATE NOT NULL,
-    secret_question VARCHAR(255),
-    secret_answer_hash VARCHAR(255),
-    registered_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    is_active BOOLEAN NOT NULL DEFAULT TRUE
+    user_id          VARCHAR(10)  PRIMARY KEY,
+    full_name        VARCHAR(200) NOT NULL,
+    email            VARCHAR(255) NOT NULL UNIQUE,
+    -- JSON source uses "password", but seed_postgres.py should hash it first.
+    -- Store only Argon2id hashes, never plain text passwords.
+    password_hash    VARCHAR(255) NOT NULL CHECK (password_hash LIKE '$argon2id$%'),
+    phone            VARCHAR(20),
+    date_of_birth    DATE NOT NULL,
+    secret_question  VARCHAR(255),
+    secret_answer    VARCHAR(255),
+    registered_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    is_active        BOOLEAN NOT NULL DEFAULT TRUE
 );
 
-
--- 國家鐵路車站表
+-- National rail stations. Arrays / nested route-neighbour data are kept as JSONB
+-- because the source JSON stores them as arrays of strings/objects.
 CREATE TABLE national_rail_stations (
-    station_id VARCHAR(10) PRIMARY KEY,
-    name VARCHAR(200) NOT NULL,
-    lines JSONB NOT NULL, -- 規範：使用 JSONB 陣列
-    is_interchange_national_rail BOOLEAN NOT NULL DEFAULT FALSE,
-    interchange_national_rail_lines JSONB,
-    is_interchange_metro BOOLEAN NOT NULL DEFAULT FALSE,
-    interchange_metro_station_id VARCHAR(10) -- 先不設硬 FK 避免 Circular Reference
+    station_id                         VARCHAR(10) PRIMARY KEY,
+    name                               VARCHAR(200) NOT NULL,
+    lines                              JSONB NOT NULL,
+    is_interchange_national_rail       BOOLEAN NOT NULL DEFAULT FALSE,
+    interchange_national_rail_lines    JSONB NOT NULL DEFAULT '[]'::jsonb,
+    is_interchange_metro               BOOLEAN NOT NULL DEFAULT FALSE,
+    -- No FK here to avoid circular seed dependency with metro_stations.
+    interchange_metro_station_id       VARCHAR(10),
+    adjacent_stations                  JSONB NOT NULL DEFAULT '[]'::jsonb
 );
 
--- 城市地鐵車站表
 CREATE TABLE metro_stations (
-    station_id VARCHAR(10) PRIMARY KEY,
-    name VARCHAR(200) NOT NULL,
-    lines JSONB NOT NULL,
-    is_interchange_metro BOOLEAN NOT NULL DEFAULT FALSE,
-    interchange_metro_lines JSONB,
-    is_interchange_national_rail BOOLEAN NOT NULL DEFAULT FALSE,
-    interchange_national_rail_station_id VARCHAR(10) REFERENCES national_rail_stations(station_id) ON DELETE SET NULL
+    station_id                             VARCHAR(10) PRIMARY KEY,
+    name                                   VARCHAR(200) NOT NULL,
+    lines                                  JSONB NOT NULL,
+    is_interchange_metro                   BOOLEAN NOT NULL DEFAULT FALSE,
+    interchange_metro_lines                JSONB NOT NULL DEFAULT '[]'::jsonb,
+    is_interchange_national_rail           BOOLEAN NOT NULL DEFAULT FALSE,
+    -- No FK here to avoid circular seed dependency with national_rail_stations.
+    interchange_national_rail_station_id   VARCHAR(10),
+    adjacent_stations                      JSONB NOT NULL DEFAULT '[]'::jsonb
 );
 
--- 補上國家鐵路指向地鐵的轉乘 FK
-ALTER TABLE national_rail_stations
-ADD CONSTRAINT fk_nr_interchange_metro
-FOREIGN KEY (interchange_metro_station_id)
-REFERENCES metro_stations(station_id) ON DELETE SET NULL;
+-- ============================================================
+-- 2. Schedule and seat tables
+-- ============================================================
 
--- =========================================================================
--- 2. 第二層表 (依賴上述車站主表)
--- =========================================================================
-
--- 國家鐵路時刻表
 CREATE TABLE national_rail_schedules (
-    schedule_id VARCHAR(20) PRIMARY KEY,
-    line VARCHAR(10) NOT NULL,
-    service_type VARCHAR(20) NOT NULL CHECK (service_type IN ('normal', 'express')),
-    direction VARCHAR(20) NOT NULL,
-    origin_station_id VARCHAR(10) NOT NULL REFERENCES national_rail_stations(station_id) ON DELETE RESTRICT,
-    destination_station_id VARCHAR(10) NOT NULL REFERENCES national_rail_stations(station_id) ON DELETE RESTRICT,
-    stops_in_order JSONB NOT NULL, -- 規範：必須使用 JSONB
-    passed_through_stations JSONB,
-    first_train_time TIME NOT NULL,
-    last_train_time TIME NOT NULL,
+    schedule_id                 VARCHAR(20) PRIMARY KEY,
+    line                        VARCHAR(10) NOT NULL,
+    service_type                VARCHAR(20) NOT NULL CHECK (service_type IN ('normal', 'express')),
+    direction                   VARCHAR(20) NOT NULL CHECK (direction IN ('northbound', 'southbound', 'eastbound', 'westbound')),
+    origin_station_id           VARCHAR(10) NOT NULL REFERENCES national_rail_stations(station_id) ON DELETE RESTRICT,
+    destination_station_id      VARCHAR(10) NOT NULL REFERENCES national_rail_stations(station_id) ON DELETE RESTRICT,
+    stops_in_order              JSONB NOT NULL,
     travel_time_from_origin_min JSONB NOT NULL,
-    fare_classes JSONB NOT NULL,
-    frequency_min INT,
-    operates_on JSONB NOT NULL
+    fare_classes                JSONB NOT NULL,
+    first_train_time            TIME NOT NULL,
+    last_train_time             TIME NOT NULL,
+    frequency_min               INTEGER NOT NULL CHECK (frequency_min > 0),
+    operates_on                 JSONB NOT NULL
 );
 
--- 城市地鐵時刻表
 CREATE TABLE metro_schedules (
-    schedule_id VARCHAR(20) PRIMARY KEY,
-    line VARCHAR(10) NOT NULL,
-    direction VARCHAR(20) NOT NULL,
-    origin_station_id VARCHAR(10) NOT NULL REFERENCES metro_stations(station_id) ON DELETE RESTRICT,
-    destination_station_id VARCHAR(10) NOT NULL REFERENCES metro_stations(station_id) ON DELETE RESTRICT,
-    stops_in_order JSONB NOT NULL,
-    first_train_time TIME NOT NULL,
-    last_train_time TIME NOT NULL,
+    schedule_id                 VARCHAR(20) PRIMARY KEY,
+    line                        VARCHAR(10) NOT NULL,
+    direction                   VARCHAR(20) NOT NULL CHECK (direction IN ('northbound', 'southbound', 'eastbound', 'westbound')),
+    origin_station_id           VARCHAR(10) NOT NULL REFERENCES metro_stations(station_id) ON DELETE RESTRICT,
+    destination_station_id      VARCHAR(10) NOT NULL REFERENCES metro_stations(station_id) ON DELETE RESTRICT,
+    stops_in_order              JSONB NOT NULL,
     travel_time_from_origin_min JSONB NOT NULL,
-    base_fare_usd NUMERIC(10, 2) NOT NULL,
-    per_stop_rate_usd NUMERIC(10, 2) NOT NULL,
-    frequency_min INT,
-    operates_on JSONB NOT NULL
+    base_fare_usd               NUMERIC(10,2) NOT NULL CHECK (base_fare_usd >= 0),
+    per_stop_rate_usd           NUMERIC(10,2) NOT NULL CHECK (per_stop_rate_usd >= 0),
+    first_train_time            TIME NOT NULL,
+    last_train_time             TIME NOT NULL,
+    frequency_min               INTEGER NOT NULL CHECK (frequency_min > 0),
+    operates_on                 JSONB NOT NULL
 );
 
--- 國家鐵路座位表 (核心：必須攤平，不可使用嵌套 JSON)
+-- The seat-layout JSON is nested, but tutorial recommends flattening seats for easy querying.
 CREATE TABLE national_rail_seats (
-    schedule_id VARCHAR(20) NOT NULL REFERENCES national_rail_schedules(schedule_id) ON DELETE CASCADE,
-    seat_id VARCHAR(10) NOT NULL,
-    coach VARCHAR(5) NOT NULL,
-    fare_class VARCHAR(20) NOT NULL CHECK (fare_class IN ('first', 'standard')),
-    seat_row INT NOT NULL,
-    seat_column VARCHAR(5) NOT NULL,
-    PRIMARY KEY (schedule_id, seat_id) -- 複合主鍵
+    schedule_id   VARCHAR(20) NOT NULL REFERENCES national_rail_schedules(schedule_id) ON DELETE CASCADE,
+    seat_id       VARCHAR(10) NOT NULL,
+    coach         VARCHAR(5) NOT NULL,
+    fare_class    VARCHAR(20) NOT NULL CHECK (fare_class IN ('first', 'standard')),
+    seat_row      INTEGER NOT NULL CHECK (seat_row > 0),
+    seat_column   VARCHAR(5) NOT NULL,
+    PRIMARY KEY (schedule_id, seat_id)
 );
 
--- =========================================================================
--- 3. 交易紀錄表 (核心橋樑表)
--- =========================================================================
+-- ============================================================
+-- 3. Transaction tables
+-- ============================================================
 
--- 國家鐵路訂票紀錄表 (手冊命名為 national_rail_bookings)
 CREATE TABLE national_rail_bookings (
-    booking_id VARCHAR(20) PRIMARY KEY,
-    user_id VARCHAR(10) NOT NULL REFERENCES registered_users(user_id) ON DELETE RESTRICT,
-    schedule_id VARCHAR(20) NOT NULL REFERENCES national_rail_schedules(schedule_id) ON DELETE RESTRICT,
-    origin_station_id VARCHAR(10) NOT NULL REFERENCES national_rail_stations(station_id) ON DELETE RESTRICT,
-    destination_station_id VARCHAR(10) NOT NULL REFERENCES national_rail_stations(station_id) ON DELETE RESTRICT,
-    travel_date DATE NOT NULL,
-    departure_time TIME NOT NULL,
-    ticket_type VARCHAR(20) NOT NULL,
-    fare_class VARCHAR(20) NOT NULL,
-    coach VARCHAR(5) NOT NULL,
-    seat_id VARCHAR(10) NOT NULL,
-    stops_travelled INT NOT NULL,
-    amount_usd NUMERIC(10, 2) NOT NULL CHECK (amount_usd >= 0),
-    status VARCHAR(20) NOT NULL CHECK (status IN ('completed', 'confirmed', 'cancelled')),
-    booked_at TIMESTAMPTZ NOT NULL,
-    travelled_at TIMESTAMPTZ
-);
-agsdg
--- 城市地鐵搭乘歷史紀錄表 (手冊命名為 metro_trips)
-CREATE TABLE metro_trips (
-    trip_id VARCHAR(20) PRIMARY KEY,
-    user_id VARCHAR(10) NOT NULL REFERENCES registered_users(user_id) ON DELETE RESTRICT,
-    schedule_id VARCHAR(20) NOT NULL REFERENCES metro_schedules(schedule_id) ON DELETE RESTRICT,
-    origin_station_id VARCHAR(10) NOT NULL REFERENCES metro_stations(station_id) ON DELETE RESTRICT,
-    destination_station_id VARCHAR(10) NOT NULL REFERENCES metro_stations(station_id) ON DELETE RESTRICT,
-    travel_date DATE NOT NULL,
-    ticket_type VARCHAR(20) NOT NULL,
-    day_pass_ref VARCHAR(20) REFERENCES metro_trips(trip_id) ON DELETE SET NULL, -- 自遞迴外鍵
-    stops_travelled INT,
-    amount_usd NUMERIC(10, 2) NOT NULL CHECK (amount_usd >= 0),
-    status VARCHAR(20) NOT NULL,
-    purchased_at TIMESTAMPTZ,
-    travelled_at TIMESTAMPTZ NOT NULL
+    booking_id              VARCHAR(20) PRIMARY KEY,
+    user_id                 VARCHAR(10) NOT NULL REFERENCES registered_users(user_id) ON DELETE RESTRICT,
+    schedule_id             VARCHAR(20) NOT NULL REFERENCES national_rail_schedules(schedule_id) ON DELETE RESTRICT,
+    origin_station_id       VARCHAR(10) NOT NULL REFERENCES national_rail_stations(station_id) ON DELETE RESTRICT,
+    destination_station_id  VARCHAR(10) NOT NULL REFERENCES national_rail_stations(station_id) ON DELETE RESTRICT,
+    travel_date             DATE NOT NULL,
+    departure_time          TIME NOT NULL,
+    ticket_type             VARCHAR(20) NOT NULL CHECK (ticket_type IN ('single', 'return')),
+    fare_class              VARCHAR(20) NOT NULL CHECK (fare_class IN ('first', 'standard')),
+    coach                   VARCHAR(5) NOT NULL,
+    seat_id                 VARCHAR(10) NOT NULL,
+    stops_travelled         INTEGER NOT NULL CHECK (stops_travelled >= 0),
+    amount_usd              NUMERIC(10,2) NOT NULL CHECK (amount_usd >= 0),
+    status                  VARCHAR(20) NOT NULL CHECK (status IN ('confirmed', 'completed', 'cancelled')),
+    booked_at               TIMESTAMPTZ NOT NULL,
+    travelled_at            TIMESTAMPTZ,
+    FOREIGN KEY (schedule_id, seat_id)
+        REFERENCES national_rail_seats(schedule_id, seat_id)
+        ON DELETE RESTRICT
 );
 
--- =========================================================================
--- 4. 付款與回饋表 (嚴格實體外鍵分離版)
--- =========================================================================
+CREATE TABLE metro_trips (
+    trip_id                 VARCHAR(20) PRIMARY KEY,
+    user_id                 VARCHAR(10) NOT NULL REFERENCES registered_users(user_id) ON DELETE RESTRICT,
+    schedule_id             VARCHAR(20) NOT NULL REFERENCES metro_schedules(schedule_id) ON DELETE RESTRICT,
+    origin_station_id       VARCHAR(10) NOT NULL REFERENCES metro_stations(station_id) ON DELETE RESTRICT,
+    destination_station_id  VARCHAR(10) NOT NULL REFERENCES metro_stations(station_id) ON DELETE RESTRICT,
+    travel_date             DATE NOT NULL,
+    ticket_type             VARCHAR(20) NOT NULL CHECK (ticket_type IN ('single', 'day_pass')),
+    day_pass_ref            VARCHAR(20) REFERENCES metro_trips(trip_id) ON DELETE SET NULL,
+    stops_travelled         INTEGER CHECK (stops_travelled IS NULL OR stops_travelled >= 0),
+    amount_usd              NUMERIC(10,2) NOT NULL CHECK (amount_usd >= 0),
+    status                  VARCHAR(20) NOT NULL CHECK (status IN ('completed', 'cancelled')),
+    purchased_at            TIMESTAMPTZ NOT NULL,
+    travelled_at            TIMESTAMPTZ
+);
+
+-- ============================================================
+-- 4. Split payment and feedback tables, matching the ERD
+-- ============================================================
+-- The original payments / feedback JSON uses a field named "booking_id" for both
+-- national rail bookings (BKxxx) and metro trips (MTxxx).
+-- To match the ERD, seed_postgres.py should route rows by prefix:
+--   BKxxx -> national_rail_payments / national_rail_feedback.booking_id
+--   MTxxx -> metro_payments / metro_feedback.trip_id
 
 CREATE TABLE national_rail_payments (
-    payment_id VARCHAR(15) PRIMARY KEY,
-    booking_id VARCHAR(20) NOT NULL REFERENCES national_rail_bookings(booking_id) ON DELETE RESTRICT,
-    amount_usd NUMERIC(10, 2) NOT NULL CHECK (amount_usd >= 0),
-    method VARCHAR(50) NOT NULL,
-    status VARCHAR(20) NOT NULL,
-    paid_at TIMESTAMPTZ NOT NULL
+    payment_id       VARCHAR(15) PRIMARY KEY,
+    booking_id       VARCHAR(20) NOT NULL REFERENCES national_rail_bookings(booking_id) ON DELETE RESTRICT,
+    amount_usd       NUMERIC(10,2) NOT NULL CHECK (amount_usd >= 0),
+    method           VARCHAR(50) NOT NULL CHECK (method IN ('credit_card', 'debit_card', 'ewallet')),
+    status           VARCHAR(20) NOT NULL CHECK (status IN ('paid', 'refunded')),
+    paid_at          TIMESTAMPTZ NOT NULL
 );
 
 CREATE TABLE metro_payments (
-    payment_id VARCHAR(15) PRIMARY KEY,
-    trip_id VARCHAR(20) NOT NULL REFERENCES metro_trips(trip_id) ON DELETE RESTRICT,
-    amount_usd NUMERIC(10, 2) NOT NULL CHECK (amount_usd >= 0),
-    method VARCHAR(50) NOT NULL,
-    status VARCHAR(20) NOT NULL,
-    paid_at TIMESTAMPTZ NOT NULL
+    payment_id       VARCHAR(15) PRIMARY KEY,
+    trip_id          VARCHAR(20) NOT NULL REFERENCES metro_trips(trip_id) ON DELETE RESTRICT,
+    amount_usd       NUMERIC(10,2) NOT NULL CHECK (amount_usd >= 0),
+    method           VARCHAR(50) NOT NULL CHECK (method IN ('credit_card', 'debit_card', 'ewallet')),
+    status           VARCHAR(20) NOT NULL CHECK (status IN ('paid', 'refunded')),
+    paid_at          TIMESTAMPTZ NOT NULL
 );
 
 CREATE TABLE national_rail_feedback (
-    feedback_id VARCHAR(15) PRIMARY KEY,
-    booking_id VARCHAR(20) NOT NULL REFERENCES national_rail_bookings(booking_id) ON DELETE RESTRICT,
-    user_id VARCHAR(10) NOT NULL REFERENCES registered_users(user_id) ON DELETE RESTRICT,
-    rating INT CHECK (rating >= 1 AND rating <= 5),
-    comment TEXT,
-    submitted_at TIMESTAMPTZ NOT NULL
+    feedback_id      VARCHAR(15) PRIMARY KEY,
+    booking_id       VARCHAR(20) NOT NULL REFERENCES national_rail_bookings(booking_id) ON DELETE RESTRICT,
+    user_id          VARCHAR(10) NOT NULL REFERENCES registered_users(user_id) ON DELETE RESTRICT,
+    rating           INTEGER NOT NULL CHECK (rating BETWEEN 1 AND 5),
+    comment          TEXT,
+    submitted_at     TIMESTAMPTZ NOT NULL
 );
 
 CREATE TABLE metro_feedback (
-    feedback_id VARCHAR(15) PRIMARY KEY,
-    trip_id VARCHAR(20) NOT NULL REFERENCES metro_trips(trip_id) ON DELETE RESTRICT,
-    user_id VARCHAR(10) NOT NULL REFERENCES registered_users(user_id) ON DELETE RESTRICT,
-    rating INT CHECK (rating >= 1 AND rating <= 5),
-    comment TEXT,
-    submitted_at TIMESTAMPTZ NOT NULL
+    feedback_id      VARCHAR(15) PRIMARY KEY,
+    trip_id          VARCHAR(20) NOT NULL REFERENCES metro_trips(trip_id) ON DELETE RESTRICT,
+    user_id          VARCHAR(10) NOT NULL REFERENCES registered_users(user_id) ON DELETE RESTRICT,
+    rating           INTEGER NOT NULL CHECK (rating BETWEEN 1 AND 5),
+    comment          TEXT,
+    submitted_at     TIMESTAMPTZ NOT NULL
 );
 
--- =========================================================================
--- 5. 外鍵效能索引 (手冊要求：手動為外鍵建立索引)
--- =========================================================================
-CREATE INDEX idx_nrb_user_id ON national_rail_bookings(user_id);
-CREATE INDEX idx_mt_user_id ON metro_trips(user_id);
-CREATE INDEX idx_nrb_schedule_id ON national_rail_bookings(schedule_id);
-CREATE INDEX idx_mt_schedule_id ON metro_trips(schedule_id);
-CREATE INDEX idx_nrp_booking_id ON national_rail_payments(booking_id);
-CREATE INDEX idx_mp_trip_id ON metro_payments(trip_id);
-CREATE INDEX idx_nrf_booking_id ON national_rail_feedback(booking_id);
-CREATE INDEX idx_mf_trip_id ON metro_feedback(trip_id);
+-- ============================================================
+-- 5. Indexes
+-- ============================================================
+
+CREATE INDEX IF NOT EXISTS idx_national_rail_stations_lines_gin ON national_rail_stations USING GIN (lines);
+CREATE INDEX IF NOT EXISTS idx_metro_stations_lines_gin ON metro_stations USING GIN (lines);
+CREATE INDEX IF NOT EXISTS idx_national_rail_schedules_operates_on_gin ON national_rail_schedules USING GIN (operates_on);
+CREATE INDEX IF NOT EXISTS idx_metro_schedules_operates_on_gin ON metro_schedules USING GIN (operates_on);
+
+CREATE INDEX IF NOT EXISTS idx_national_rail_schedules_origin ON national_rail_schedules(origin_station_id);
+CREATE INDEX IF NOT EXISTS idx_national_rail_schedules_destination ON national_rail_schedules(destination_station_id);
+CREATE INDEX IF NOT EXISTS idx_metro_schedules_origin ON metro_schedules(origin_station_id);
+CREATE INDEX IF NOT EXISTS idx_metro_schedules_destination ON metro_schedules(destination_station_id);
+
+CREATE INDEX IF NOT EXISTS idx_national_rail_bookings_user_id ON national_rail_bookings(user_id);
+CREATE INDEX IF NOT EXISTS idx_national_rail_bookings_schedule_id ON national_rail_bookings(schedule_id);
+CREATE INDEX IF NOT EXISTS idx_national_rail_bookings_travel_date ON national_rail_bookings(travel_date);
+CREATE INDEX IF NOT EXISTS idx_metro_trips_user_id ON metro_trips(user_id);
+CREATE INDEX IF NOT EXISTS idx_metro_trips_schedule_id ON metro_trips(schedule_id);
+CREATE INDEX IF NOT EXISTS idx_metro_trips_travel_date ON metro_trips(travel_date);
+
+CREATE INDEX IF NOT EXISTS idx_national_rail_payments_booking_id ON national_rail_payments(booking_id);
+CREATE INDEX IF NOT EXISTS idx_metro_payments_trip_id ON metro_payments(trip_id);
+CREATE INDEX IF NOT EXISTS idx_national_rail_feedback_booking_id ON national_rail_feedback(booking_id);
+CREATE INDEX IF NOT EXISTS idx_national_rail_feedback_user_id ON national_rail_feedback(user_id);
+CREATE INDEX IF NOT EXISTS idx_metro_feedback_trip_id ON metro_feedback(trip_id);
+CREATE INDEX IF NOT EXISTS idx_metro_feedback_user_id ON metro_feedback(user_id);
 
 -- ============================================================
---  VECTOR SCHEMA  (RAG / Help Desk) — do not modify
+-- 6. VECTOR SCHEMA  (RAG / Help Desk)do not modify
 -- ============================================================
 
 CREATE EXTENSION IF NOT EXISTS vector;
 
-CREATE TABLE IF NOT EXISTS policy_documents (
+CREATE TABLE policy_documents (
     id          SERIAL       PRIMARY KEY,
     title       VARCHAR(200) NOT NULL,
     category    VARCHAR(50)  NOT NULL,  -- 'refund', 'booking', 'conduct'
@@ -226,5 +248,5 @@ CREATE TABLE IF NOT EXISTS policy_documents (
     created_at  TIMESTAMPTZ  DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS policy_documents_embedding_hnsw_idx 
+CREATE INDEX IF NOT EXISTS policy_documents_embedding_hnsw_idx
 ON policy_documents USING hnsw (embedding vector_cosine_ops);
