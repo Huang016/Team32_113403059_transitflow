@@ -1,181 +1,188 @@
 ```mermaid
 erDiagram
+    %% 1. 使用者與 AI 政策檢索 (Vector)
+    users {
+        VARCHAR user_id PK
+        VARCHAR full_name "NOT NULL"
+        VARCHAR email UK "NOT NULL"
+        VARCHAR password_hash
+        VARCHAR phone
+        DATE date_of_birth "NOT NULL"
+        VARCHAR secret_question
+        VARCHAR secret_answer
+        TIMESTAMPTZ registered_at "NOT NULL"
+        BOOLEAN is_active "NOT NULL DEFAULT TRUE"
+    }
+
+    policy_documents {
+        SERIAL id PK
+        VARCHAR title "NOT NULL"
+        VARCHAR category "NOT NULL"
+        TEXT content "NOT NULL"
+        vector embedding "768 或 3072 維度"
+        VARCHAR source_file
+        TIMESTAMPTZ created_at
+    }
+
+    %% 2. 基礎建設 (車站與時刻表)
+    national_rail_stations {
+        VARCHAR station_id PK
+        VARCHAR name "NOT NULL"
+        JSONB lines 
+        BOOLEAN is_interchange_national_rail
+        JSONB interchange_national_rail_lines
+        BOOLEAN is_interchange_metro
+        VARCHAR interchange_metro_station_id
+    }
+
+    metro_stations {
+        VARCHAR station_id PK
+        VARCHAR name "NOT NULL"
+        JSONB lines 
+        BOOLEAN is_interchange_metro
+        JSONB interchange_metro_lines
+        BOOLEAN is_interchange_national_rail
+        VARCHAR interchange_national_rail_station_id
+    }
+
+    national_rail_schedules {
+        VARCHAR schedule_id PK
+        VARCHAR line "NOT NULL"
+        VARCHAR service_type "normal / express"
+        VARCHAR direction
+        VARCHAR origin_station_id FK
+        VARCHAR destination_station_id FK
+        JSONB stops_in_order 
+        JSONB passed_through_stations 
+        TIME first_train_time
+        TIME last_train_time
+        JSONB travel_time_from_origin_min 
+        JSONB fare_classes 
+        INTEGER frequency_min
+        JSONB operates_on 
+    }
+
+    metro_schedules {
+        VARCHAR schedule_id PK
+        VARCHAR line "NOT NULL"
+        VARCHAR direction
+        VARCHAR origin_station_id FK
+        VARCHAR destination_station_id FK
+        JSONB stops_in_order 
+        TIME first_train_time
+        TIME last_train_time
+        JSONB travel_time_from_origin_min 
+        DECIMAL base_fare_usd "10,2"
+        DECIMAL per_stop_rate_usd "10,2"
+        INTEGER frequency_min
+        JSONB operates_on 
+    }
+
+    %% 3. 反正規化設計 (攤平座位)
+    national_rail_seats {
+        VARCHAR schedule_id PK, FK
+        VARCHAR seat_id PK
+        VARCHAR coach 
+        VARCHAR fare_class
+        INTEGER seat_row
+        VARCHAR seat_column 
+    }
+
+    %% 4. 交易與搭乘核心 (訂單與旅程)
+    national_rail_bookings {
+        VARCHAR booking_id PK
+        VARCHAR user_id FK
+        VARCHAR schedule_id FK
+        VARCHAR origin_station_id FK
+        VARCHAR destination_station_id FK
+        DATE travel_date "NOT NULL"
+        TIME departure_time "NOT NULL"
+        VARCHAR ticket_type
+        VARCHAR fare_class
+        VARCHAR coach "NOT NULL"
+        VARCHAR seat_id "NOT NULL"
+        INTEGER stops_travelled "NOT NULL"
+        DECIMAL amount_usd "10,2 NOT NULL"
+        VARCHAR status "completed / confirmed / cancelled"
+        TIMESTAMPTZ booked_at "NOT NULL"
+        TIMESTAMPTZ travelled_at 
+    }
+
+    metro_trips {
+        VARCHAR trip_id PK
+        VARCHAR user_id FK
+        VARCHAR schedule_id FK
+        VARCHAR origin_station_id FK
+        VARCHAR destination_station_id FK
+        DATE travel_date "NOT NULL"
+        VARCHAR ticket_type
+        VARCHAR day_pass_ref FK "自遞迴"
+        INTEGER stops_travelled 
+        DECIMAL amount_usd "10,2 NOT NULL"
+        VARCHAR status "completed / cancelled"
+        TIMESTAMPTZ purchased_at 
+        TIMESTAMPTZ travelled_at "NOT NULL"
+    }
+
+    %% 5. 【全新設計】各自獨立的支付與回饋表
+    national_rail_payments {
+        VARCHAR payment_id PK
+        VARCHAR booking_id FK "嚴格參照 national_rail_bookings"
+        DECIMAL amount_usd "10,2 NOT NULL"
+        VARCHAR method
+        VARCHAR status
+        TIMESTAMPTZ paid_at "NOT NULL"
+    }
+
+    metro_payments {
+        VARCHAR payment_id PK
+        VARCHAR trip_id FK "嚴格參照 metro_trips"
+        DECIMAL amount_usd "10,2 NOT NULL"
+        VARCHAR method
+        VARCHAR status
+        TIMESTAMPTZ paid_at "NOT NULL"
+    }
+
+    national_rail_feedback {
+        VARCHAR feedback_id PK
+        VARCHAR booking_id FK "嚴格參照 national_rail_bookings"
+        VARCHAR user_id FK "ON DELETE RESTRICT"
+        INTEGER rating "CHECK (1-5)"
+        TEXT comment 
+        TIMESTAMPTZ submitted_at "NOT NULL"
+    }
+
+    metro_feedback {
+        VARCHAR feedback_id PK
+        VARCHAR trip_id FK "嚴格參照 metro_trips"
+        VARCHAR user_id FK "ON DELETE RESTRICT"
+        INTEGER rating "CHECK (1-5)"
+        TEXT comment 
+        TIMESTAMPTZ submitted_at "NOT NULL"
+    }
+
     %% ==========================================
-    %% 1. 實體關係定義 (Relationships)
+    %% 關係映射 (Relationships)
     %% ==========================================
+    %% 基礎關聯
+    national_rail_schedules ||--o{ national_rail_seats : "flattens"
+    national_rail_schedules ||--o{ national_rail_bookings : "uses"
+    metro_schedules ||--o{ metro_trips : "uses"
     
-    %% 基礎建設網絡關聯
-    NATIONAL_RAIL_STATIONS ||--o{ NATIONAL_RAIL_SCHEDULES : "origin of"
-    NATIONAL_RAIL_STATIONS ||--o{ NATIONAL_RAIL_SCHEDULES : "destination of"
-    NATIONAL_RAIL_SCHEDULES ||--|| NATIONAL_RAIL_SEAT_LAYOUTS : "defines template for"
-    METRO_STATIONS ||--o{ METRO_SCHEDULES : "origin of"
-    METRO_STATIONS ||--o{ METRO_SCHEDULES : "destination of"
+    national_rail_stations ||--o{ national_rail_bookings : "origin_of"
+    national_rail_stations ||--o{ national_rail_bookings : "dest_of"
+    metro_stations ||--o{ metro_trips : "origin_of"
+    metro_stations ||--o{ metro_trips : "dest_of"
+    metro_trips ||--o| metro_trips : "day_pass_ref"
 
-    %% 使用者與交易核心關聯
-    REGISTERED_USERS ||--o{ BOOKINGS : "places"
-    REGISTERED_USERS ||--o{ METRO_TRAVEL_HISTORY : "travels on"
-    
-    %% 訂單/行程與基礎建設的連結
-    NATIONAL_RAIL_SCHEDULES ||--o{ BOOKINGS : "scheduled via"
-    NATIONAL_RAIL_STATIONS ||--o{ BOOKINGS : "departs from"
-    NATIONAL_RAIL_STATIONS ||--o{ BOOKINGS : "arrives at"
-    METRO_SCHEDULES ||--o{ METRO_TRAVEL_HISTORY : "scheduled via"
-    METRO_STATIONS ||--o{ METRO_TRAVEL_HISTORY : "enters from"
-    METRO_STATIONS ||--o{ METRO_TRAVEL_HISTORY : "exits to"
+    %% 使用者關聯
+    users ||--o{ national_rail_bookings : "places"
+    users ||--o{ metro_trips : "takes"
+    users ||--o{ national_rail_feedback : "submits"
+    users ||--o{ metro_feedback : "submits"
 
-    %% 付款與回饋
-    BOOKINGS ||--|| RAIL_PAYMENTS : "has"
-    METRO_TRAVEL_HISTORY ||--|| METRO_PAYMENTS : "has"
-
-    BOOKINGS ||--o| RAIL_FEEDBACK : "receives"
-    METRO_TRAVEL_HISTORY ||--o| METRO_FEEDBACK : "receives"
-
-    REGISTERED_USERS ||--o{ RAIL_FEEDBACK : "writes"
-    REGISTERED_USERS ||--o{ METRO_FEEDBACK : "writes"
-
-    %% ==========================================
-    %% 2. 實體欄位定義 (Entities)
-    %% ==========================================
-
-    REGISTERED_USERS {
-        string user_id PK
-        string full_name
-        string email
-        string password_hash
-        string phone
-        date date_of_birth
-        string secret_question
-        string secret_answer_hash
-        timestamp registered_at
-        boolean is_active
-    }
-
-    NATIONAL_RAIL_STATIONS {
-        string station_id PK
-        string name
-        string_array lines
-        boolean is_interchange_national_rail
-        string_array interchange_national_rail_lines
-        boolean is_interchange_metro
-        string interchange_metro_station_id FK
-    }
-
-    METRO_STATIONS {
-        string station_id PK
-        string name
-        string_array lines
-        boolean is_interchange_metro
-        string_array interchange_metro_lines
-        boolean is_interchange_national_rail
-        string interchange_national_rail_station_id FK
-    }
-
-    NATIONAL_RAIL_SCHEDULES {
-        string schedule_id PK
-        string line
-        string service_type
-        string direction
-        string origin_station_id FK
-        string destination_station_id FK
-        string_array stops_in_order
-        string_array passed_through_stations
-        time first_train_time
-        time last_train_time
-        jsonb travel_time_from_origin_min
-        jsonb fare_classes
-        int frequency_min
-        string_array operates_on
-    }
-
-    METRO_SCHEDULES {
-        string schedule_id PK
-        string line
-        string direction
-        string origin_station_id FK
-        string destination_station_id FK
-        string_array stops_in_order
-        time first_train_time
-        time last_train_time
-        jsonb travel_time_from_origin_min
-        decimal base_fare_usd
-        decimal per_stop_rate_usd
-        int frequency_min
-        string_array operates_on
-    }
-
-    NATIONAL_RAIL_SEAT_LAYOUTS {
-        string layout_id PK
-        string schedule_id FK
-        jsonb coaches
-    }
-
-    BOOKINGS {
-        string booking_id PK
-        string user_id FK
-        string schedule_id FK
-        string origin_station_id FK
-        string destination_station_id FK
-        date travel_date
-        time departure_time
-        string ticket_type
-        string fare_class
-        string coach
-        string seat_id
-        int stops_travelled
-        decimal amount_usd
-        string status
-        timestamp booked_at
-        timestamp travelled_at
-    }
-
-    METRO_TRAVEL_HISTORY {
-        string trip_id PK
-        string user_id FK
-        string schedule_id FK
-        string origin_station_id FK
-        string destination_station_id FK
-        date travel_date
-        string ticket_type
-        string day_pass_ref
-        int stops_travelled
-        decimal amount_usd
-        string status
-        timestamp purchased_at
-        timestamp travelled_at
-    }
-
-
-    RAIL_PAYMENTS {
-        string payment_id PK
-        string booking_id FK
-        decimal amount_usd
-        string method
-        string status
-        timestamp paid_at
-    }
-
-    METRO_PAYMENTS {
-        string payment_id PK
-        string trip_id FK
-        decimal amount_usd
-        string method
-        string status
-        timestamp paid_at
-    }
-    RAIL_FEEDBACK {
-        string feedback_id PK
-        string booking_id FK
-        string user_id FK
-        int rating
-        string comment
-        timestamp submitted_at
-    }
-
-    METRO_FEEDBACK {
-        string feedback_id PK
-        string trip_id FK
-        string user_id FK
-        int rating
-        string comment
-        timestamp submitted_at
-    }
+    %% 【拆分後的實體外鍵關聯 (實線)】
+    national_rail_bookings ||--o{ national_rail_payments : "has_payment"
+    metro_trips ||--o{ metro_payments : "has_payment"
+    national_rail_bookings ||--o{ national_rail_feedback : "has_feedback"
+    metro_trips ||--o{ metro_feedback : "has_feedback"
