@@ -5,6 +5,9 @@
 -- 2) Removed circular FK constraints between metro_stations and national_rail_stations
 --    for interchange columns, so seed_postgres.py can load station JSON safely.
 -- 3) Added DROP TABLE IF EXISTS and CREATE INDEX IF NOT EXISTS so this file can be rerun.
+-- 4) Added available-seat lookup / anti-double-booking indexes for national rail bookings.
+-- 5) Kept secret_answer as plain text; only password is hashed.
+-- 6) Added get_available_national_rail_seats() function.
 -- Seed data is loaded separately by: python skeleton/seed_postgres.py
 -- ============================================================
 
@@ -39,7 +42,7 @@ CREATE TABLE registered_users (
     phone            VARCHAR(20),
     date_of_birth    DATE NOT NULL,
     secret_question  VARCHAR(255),
-    secret_answer    VARCHAR(255),
+    secret_answer    VARCHAR(255) ,
     registered_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     is_active        BOOLEAN NOT NULL DEFAULT TRUE
 );
@@ -155,7 +158,7 @@ CREATE TABLE metro_trips (
     stops_travelled         INTEGER CHECK (stops_travelled IS NULL OR stops_travelled >= 0),
     amount_usd              NUMERIC(10,2) NOT NULL CHECK (amount_usd >= 0),
     status                  VARCHAR(20) NOT NULL CHECK (status IN ('completed', 'cancelled')),
-    purchased_at            TIMESTAMPTZ NOT NULL,
+    purchased_at            TIMESTAMPTZ,
     travelled_at            TIMESTAMPTZ
 );
 
@@ -221,6 +224,24 @@ CREATE INDEX IF NOT EXISTS idx_metro_schedules_destination ON metro_schedules(de
 CREATE INDEX IF NOT EXISTS idx_national_rail_bookings_user_id ON national_rail_bookings(user_id);
 CREATE INDEX IF NOT EXISTS idx_national_rail_bookings_schedule_id ON national_rail_bookings(schedule_id);
 CREATE INDEX IF NOT EXISTS idx_national_rail_bookings_travel_date ON national_rail_bookings(travel_date);
+
+-- Available-seat lookup index:
+-- Used by queries that find seats in national_rail_seats that are NOT occupied
+-- by confirmed / completed bookings for the same schedule + date + departure time.
+CREATE INDEX IF NOT EXISTS idx_national_rail_bookings_available_seats
+ON national_rail_bookings (schedule_id, travel_date, departure_time, seat_id)
+WHERE status IN ('confirmed', 'completed');
+
+-- Prevent double-booking the same seat on the same scheduled departure.
+-- Cancelled bookings are excluded, so a cancelled seat can be sold again.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_national_rail_active_seat_booking
+ON national_rail_bookings (schedule_id, travel_date, departure_time, seat_id)
+WHERE status IN ('confirmed', 'completed');
+
+-- Helps seat-filtering screens such as first/standard class or coach filters.
+CREATE INDEX IF NOT EXISTS idx_national_rail_seats_schedule_class_coach
+ON national_rail_seats (schedule_id, fare_class, coach);
+
 CREATE INDEX IF NOT EXISTS idx_metro_trips_user_id ON metro_trips(user_id);
 CREATE INDEX IF NOT EXISTS idx_metro_trips_schedule_id ON metro_trips(schedule_id);
 CREATE INDEX IF NOT EXISTS idx_metro_trips_travel_date ON metro_trips(travel_date);
@@ -232,8 +253,55 @@ CREATE INDEX IF NOT EXISTS idx_national_rail_feedback_user_id ON national_rail_f
 CREATE INDEX IF NOT EXISTS idx_metro_feedback_trip_id ON metro_feedback(trip_id);
 CREATE INDEX IF NOT EXISTS idx_metro_feedback_user_id ON metro_feedback(user_id);
 
+
 -- ============================================================
--- 6. VECTOR SCHEMA  (RAG / Help Desk)do not modify
+-- 6. Available seats function
+-- ============================================================
+-- Calculates available seats dynamically from:
+--   national_rail_seats - confirmed/completed national_rail_bookings
+-- Usage example:
+-- SELECT *
+-- FROM get_available_national_rail_seats('NR_SCH01', DATE '2026-04-02', TIME '07:00');
+
+CREATE OR REPLACE FUNCTION get_available_national_rail_seats(
+    p_schedule_id VARCHAR,
+    p_travel_date DATE,
+    p_departure_time TIME
+)
+RETURNS TABLE (
+    schedule_id VARCHAR,
+    seat_id VARCHAR,
+    coach VARCHAR,
+    fare_class VARCHAR,
+    seat_row INTEGER,
+    seat_column VARCHAR
+) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT
+        s.schedule_id,
+        s.seat_id,
+        s.coach,
+        s.fare_class,
+        s.seat_row,
+        s.seat_column
+    FROM national_rail_seats s
+    WHERE s.schedule_id = p_schedule_id
+      AND NOT EXISTS (
+          SELECT 1
+          FROM national_rail_bookings b
+          WHERE b.schedule_id = s.schedule_id
+            AND b.travel_date = p_travel_date
+            AND b.departure_time = p_departure_time
+            AND b.seat_id = s.seat_id
+            AND b.status IN ('confirmed', 'completed')
+      )
+    ORDER BY s.coach, s.seat_row, s.seat_column;
+END;
+$$ LANGUAGE plpgsql;
+
+-- ============================================================
+-- 7. VECTOR SCHEMA  (RAG / Help Desk)do not modify
 -- ============================================================
 
 CREATE EXTENSION IF NOT EXISTS vector;

@@ -1,7 +1,7 @@
 ```mermaid
 erDiagram
     %% 1. 使用者與 AI 政策檢索 (Vector)
-    users {
+    registered_users {
         VARCHAR user_id PK
         VARCHAR full_name "NOT NULL"
         VARCHAR email UK "NOT NULL"
@@ -19,7 +19,7 @@ erDiagram
         VARCHAR title "NOT NULL"
         VARCHAR category "NOT NULL"
         TEXT content "NOT NULL"
-        vector embedding "768 或 3072 維度"
+        vector embedding "768 維度"
         VARCHAR source_file
         TIMESTAMPTZ created_at
     }
@@ -53,7 +53,6 @@ erDiagram
         VARCHAR origin_station_id FK
         VARCHAR destination_station_id FK
         JSONB stops_in_order 
-        JSONB passed_through_stations 
         TIME first_train_time
         TIME last_train_time
         JSONB travel_time_from_origin_min 
@@ -121,7 +120,7 @@ erDiagram
         DECIMAL amount_usd "10,2 NOT NULL"
         VARCHAR status "completed / cancelled"
         TIMESTAMPTZ purchased_at 
-        TIMESTAMPTZ travelled_at "NOT NULL"
+        TIMESTAMPTZ travelled_at
     }
 
     %% 5. 【全新設計】各自獨立的支付與回饋表
@@ -176,10 +175,10 @@ erDiagram
     metro_trips ||--o| metro_trips : "day_pass_ref"
 
     %% 使用者關聯
-    users ||--o{ national_rail_bookings : "places"
-    users ||--o{ metro_trips : "takes"
-    users ||--o{ national_rail_feedback : "submits"
-    users ||--o{ metro_feedback : "submits"
+    registered_users ||--o{ national_rail_bookings : "places"
+    registered_users ||--o{ metro_trips : "takes"
+    registered_users ||--o{ national_rail_feedback : "submits"
+    registered_users ||--o{ metro_feedback : "submits"
 
     %% 【拆分後的實體外鍵關聯 (實線)】
     national_rail_bookings ||--o{ national_rail_payments : "has_payment"
