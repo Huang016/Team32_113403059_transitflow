@@ -119,6 +119,14 @@ CREATE (a)-[:CONNECTS_TO {
 
 // 建立雙向跨網路轉乘通道範例
 MATCH (m:Station {station_id: "MS01"}), (r:Station {station_id: "NR01"})
-CREATE (m)-[:INTERCHANGE_TO {travel_time_min: 0, fare: 0.0}]->(r),
-       (r)-[:INTERCHANGE_TO {travel_time_min: 0, fare: 0.0}]->(m);
+CREATE (m)-[:INTERCHANGE_TO {
+  travel_time_min: 0,
+  fare_standard: 0.0,
+  fare_first: 0.0
+}]->(r),
+(r)-[:INTERCHANGE_TO {
+  travel_time_min: 0,
+  fare_standard: 0.0,
+  fare_first: 0.0
+}]->(m);
 */

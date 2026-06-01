@@ -14,7 +14,15 @@ def _parse_path(path_record):
     nodes = path_record.nodes
     rels = path_record.relationships
     
-    stations = [{"station_id": n["station_id"], "name": n["name"], "network": n["network"]} for n in nodes]
+    stations = [
+        {
+            "station_id": n.get("station_id"),
+            "name": n.get("name"),
+            "network": n.get("network"),
+            "lines": n.get("lines", [])
+        }
+        for n in nodes
+    ]
     legs = []
     
     for r in rels:
@@ -33,6 +41,15 @@ def _parse_path(path_record):
 # ── FASTEST ROUTE (Dijkstra by travel_time_min) ───────────────────────────────
 
 def query_shortest_route(origin_id: str, destination_id: str, network: str = "auto") -> dict:
+    if origin_id == destination_id:
+        return {
+            "found": True,
+            "origin_id": origin_id,
+            "destination_id": destination_id,
+            "total_time_min": 0,
+            "path": [{"station_id": origin_id}],
+            "legs": []
+        }
     query = """
     MATCH (start:Station {station_id: $origin_id})
     MATCH (end:Station {station_id: $destination_id})
@@ -61,7 +78,13 @@ def query_shortest_route(origin_id: str, destination_id: str, network: str = "au
 
 def query_cheapest_route(origin_id: str, destination_id: str, network: str = "auto", fare_class: str = "standard") -> dict:
     weight_prop = "fare_first" if fare_class == "first" else "fare_standard"
-    
+    if origin_id == destination_id:
+        return {
+            "found": True,
+            "total_fare_usd": 0,
+            "stations": [{"station_id": origin_id}],
+            "legs": []
+        }
     query = """
     MATCH (start:Station {station_id: $origin_id})
     MATCH (end:Station {station_id: $destination_id})
@@ -86,7 +109,7 @@ def query_cheapest_route(origin_id: str, destination_id: str, network: str = "au
 
 # ── ALTERNATIVE ROUTES (avoiding a station) ───────────────────────────────────
 
-def query_alternative_routes(origin_id: str, destination_id: str, avoid_station_id: str, network: str = "auto", max_routes: int = 3) -> list[list[dict]]:
+def query_alternative_routes(origin_id: str, destination_id: str, avoid_station_id: str, network: str = "auto", max_routes: int = 3) -> list[dict]:
     query = """
     MATCH (start:Station {station_id: $origin_id})
     MATCH (end:Station {station_id: $destination_id})
@@ -101,8 +124,11 @@ def query_alternative_routes(origin_id: str, destination_id: str, avoid_station_
             result = session.run(query, origin_id=origin_id, destination_id=destination_id, avoid_station_id=avoid_station_id, max_routes=max_routes)
             routes = []
             for record in result:
-                _, legs = _parse_path(record["path"])
-                routes.append(legs)
+                stations, legs = _parse_path(record["path"])
+                routes.append({
+                    "stations": stations,
+                    "legs": legs
+                })
             return routes
 
 

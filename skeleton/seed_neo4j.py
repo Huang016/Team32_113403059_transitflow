@@ -116,8 +116,16 @@ def seed():
                 ms_id = station["station_id"]
                 session.run("""
                     MATCH (m:Station {station_id: $ms_id}), (r:Station {station_id: $nr_id})
-                    MERGE (m)-[:INTERCHANGE_TO {travel_time_min: 0, fare: 0.0}]->(r)
-                    MERGE (r)-[:INTERCHANGE_TO {travel_time_min: 0, fare: 0.0}]->(m)
+                    MERGE (m)-[:INTERCHANGE_TO {
+                        travel_time_min: 0,
+                        fare_standard: 0.0,
+                        fare_first: 0.0
+                    }]->(r)
+                    MERGE (r)-[:INTERCHANGE_TO {
+                        travel_time_min: 0,
+                        fare_standard: 0.0,
+                        fare_first: 0.0
+                    }]->(m)
                 """, ms_id=ms_id, nr_id=nr_id)
                 
         print("  Created all CONNECTS_TO and INTERCHANGE_TO relationships")
