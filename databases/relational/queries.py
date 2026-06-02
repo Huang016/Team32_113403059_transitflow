@@ -466,7 +466,8 @@ def query_user_profile(user_email: str) -> Optional[dict]:
             registered_at,
             is_active
         FROM registered_users
-        WHERE email = %s;
+        WHERE email = %s
+        AND is_active = TRUE;
     """
 
     with _connect() as conn:

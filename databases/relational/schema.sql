@@ -224,7 +224,10 @@ CREATE INDEX IF NOT EXISTS idx_metro_schedules_destination ON metro_schedules(de
 CREATE INDEX IF NOT EXISTS idx_national_rail_bookings_user_id ON national_rail_bookings(user_id);
 CREATE INDEX IF NOT EXISTS idx_national_rail_bookings_schedule_id ON national_rail_bookings(schedule_id);
 CREATE INDEX IF NOT EXISTS idx_national_rail_bookings_travel_date ON national_rail_bookings(travel_date);
-
+CREATE INDEX IF NOT EXISTS idx_nrb_origin ON national_rail_bookings(origin_station_id);
+CREATE INDEX IF NOT EXISTS idx_nrb_dest ON national_rail_bookings(destination_station_id);
+CREATE INDEX IF NOT EXISTS idx_mt_origin ON metro_trips(origin_station_id);
+CREATE INDEX IF NOT EXISTS idx_mt_dest ON metro_trips(destination_station_id);
 -- Available-seat lookup index:
 -- Used by queries that find seats in national_rail_seats that are NOT occupied
 -- by confirmed / completed bookings for the same schedule + date + departure time.
