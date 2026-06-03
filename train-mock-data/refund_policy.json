@@ -188,4 +188,32 @@
     ],
     "notes": "This policy is triggered exclusively by official safety warnings issued by the national meteorological agency."
   }
+  ,
+  {
+    "policy_id": "RF007",
+    "label": "Metro – Monthly Commuter Pass",
+    "applies_to": {
+      "network_type": "metro",
+      "ticket_types": ["monthly_pass"]
+    },
+    "cancellation_windows": [
+      {
+        "window_id": "RF007_W1",
+        "label": "Early cancellation (Pro-rated)",
+        "condition": "Cancellation requested before the 7th day of use",
+        "status_condition": "Pass is active for less than 7 days",
+        "refund_percent": "Pro-rated based on unused days",
+        "admin_fee_usd": 5.00
+      },
+      {
+        "window_id": "RF007_W2",
+        "label": "No refund",
+        "condition": "Cancellation requested on or after the 7th day of use",
+        "status_condition": "Pass has been active for 7 or more days",
+        "refund_percent": 0,
+        "admin_fee_usd": 0.00
+      }
+    ],
+    "notes": "Pro-rated refund is calculated by dividing the $75.00 price by 30 days, multiplied by the remaining days, minus the $5.00 admin fee."
+  }
 ]

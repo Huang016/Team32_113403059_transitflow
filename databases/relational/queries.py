@@ -555,34 +555,21 @@ def query_user_bookings(user_email: str) -> dict:
 
 
 def query_payment_info(booking_id: str) -> Optional[dict]:
-    """Return payment record for a BK... booking or MT... metro trip."""
+    """Return payment record for a BK... booking, MT... metro trip, or MP... monthly pass."""
     if booking_id.startswith("BK"):
         sql = """
-            SELECT
-                payment_id,
-                booking_id,
-                NULL::varchar AS trip_id,
-                'national_rail' AS payment_type,
-                amount_usd,
-                method,
-                status,
-                paid_at
-            FROM national_rail_payments
-            WHERE booking_id = %s;
+            SELECT payment_id, booking_id, NULL::varchar AS trip_id, 'national_rail' AS payment_type, amount_usd, method, status, paid_at
+            FROM national_rail_payments WHERE booking_id = %s;
         """
     elif booking_id.startswith("MT"):
         sql = """
-            SELECT
-                payment_id,
-                NULL::varchar AS booking_id,
-                trip_id,
-                'metro' AS payment_type,
-                amount_usd,
-                method,
-                status,
-                paid_at
-            FROM metro_payments
-            WHERE trip_id = %s;
+            SELECT payment_id, NULL::varchar AS booking_id, trip_id, 'metro' AS payment_type, amount_usd, method, status, paid_at
+            FROM metro_payments WHERE trip_id = %s;
+        """
+    elif booking_id.startswith("MP"): # ✨ 新增支援月票 (Monthly Pass) 查帳
+        sql = """
+            SELECT payment_id, NULL::varchar AS booking_id, NULL::varchar AS trip_id, 'monthly_pass' AS payment_type, amount_usd, method, status, paid_at
+            FROM metro_payments WHERE trip_id = %s; -- 在這裡月票的 payment 會暫存在 metro_payments 中，或您可以視架構調整
         """
     else:
         return None
@@ -679,6 +666,71 @@ def query_interchange_stations() -> list[dict]:
 
 
 # ── TRANSACTIONAL OPERATIONS ──────────────────────────────────────────────────
+def query_active_monthly_pass(user_id: str) -> Optional[dict]:
+    """Check if a user has an active monthly pass for today."""
+    sql = """
+        SELECT pass_id, valid_from, valid_until, price_usd, purchased_at
+        FROM metro_monthly_passes
+        WHERE user_id = %s
+          AND CURRENT_DATE BETWEEN valid_from AND valid_until
+        ORDER BY valid_until DESC
+        LIMIT 1;
+    """
+    with _connect() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(sql, (user_id,))
+            row = cur.fetchone()
+            return dict(row) if row else None
+
+def execute_buy_monthly_pass(user_id: str, start_date: str) -> tuple[bool, dict | str]:
+    """Purchase a 30-day metro monthly pass for $75.00."""
+    conn = psycopg2.connect(PG_DSN)
+    conn.autocommit = False
+
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            # 檢查使用者
+            cur.execute("SELECT user_id FROM registered_users WHERE user_id = %s AND is_active = TRUE;", (user_id,))
+            if not cur.fetchone():
+                conn.rollback()
+                return False, "User does not exist or is inactive."
+
+            # 產生 ID (這裡我們以 MP 開頭代表 Monthly Pass)
+            pass_id = _gen_fallback_id("MP")
+            payment_id = _gen_payment_id(cur)
+            now = datetime.now(timezone.utc)
+            price = 75.00
+
+            # 1. 寫入月票紀錄 (自動計算 30 天效期)
+            cur.execute(
+                """
+                INSERT INTO metro_monthly_passes (pass_id, user_id, valid_from, valid_until, price_usd, purchased_at)
+                VALUES (%s, %s, %s::date, %s::date + INTERVAL '29 days', %s, %s)
+                RETURNING *;
+                """,
+                (pass_id, user_id, start_date, start_date, price, now)
+            )
+            monthly_pass = dict(cur.fetchone())
+
+            # 2. 寫入付款紀錄 (存入 metro_payments，trip_id 欄位借用存 pass_id)
+            cur.execute(
+                """
+                INSERT INTO metro_payments (payment_id, trip_id, amount_usd, method, status, paid_at)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                RETURNING *;
+                """,
+                (payment_id, pass_id, price, "credit_card", "paid", now)
+            )
+            payment = dict(cur.fetchone())
+
+            conn.commit()
+            return True, {"monthly_pass": monthly_pass, "payment": payment}
+
+    except Exception as e:
+        conn.rollback()
+        return False, str(e)
+    finally:
+        conn.close()
 
 def execute_booking(
     user_id: str,

@@ -70,6 +70,7 @@
     "advance_booking": {
       "single_ticket": "Metro single tickets are purchased on the day of travel only. Advance booking is not available.",
       "day_pass": "Metro day passes are purchased on the day of travel only. They are valid from 00:00 to 23:59 on the date of purchase.",
+      "monthly_pass": "Monthly passes can be purchased in advance or on the day of travel via the app. The 30-day validity begins automatically upon the first tap-in at any metro station.",
       "where_to_buy": "Tickets can be purchased via the app or at station ticket machines."
     },
     "seat_selection": {

@@ -19,6 +19,7 @@ DROP TABLE IF EXISTS national_rail_feedback CASCADE;
 DROP TABLE IF EXISTS metro_payments CASCADE;
 DROP TABLE IF EXISTS national_rail_payments CASCADE;
 DROP TABLE IF EXISTS metro_trips CASCADE;
+DROP TABLE IF EXISTS metro_monthly_passes CASCADE;
 DROP TABLE IF EXISTS national_rail_bookings CASCADE;
 DROP TABLE IF EXISTS national_rail_seats CASCADE;
 DROP TABLE IF EXISTS metro_schedules CASCADE;
@@ -145,7 +146,14 @@ CREATE TABLE national_rail_bookings (
         REFERENCES national_rail_seats(schedule_id, seat_id)
         ON DELETE RESTRICT
 );
-
+CREATE TABLE metro_monthly_passes (
+    pass_id          VARCHAR(20) PRIMARY KEY,
+    user_id          VARCHAR(10) NOT NULL REFERENCES registered_users(user_id) ON DELETE RESTRICT,
+    valid_from       DATE NOT NULL,
+    valid_until      DATE NOT NULL,
+    price_usd        NUMERIC(10,2) NOT NULL CHECK (price_usd >= 0),
+    purchased_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 CREATE TABLE metro_trips (
     trip_id                 VARCHAR(20) PRIMARY KEY,
     user_id                 VARCHAR(10) NOT NULL REFERENCES registered_users(user_id) ON DELETE RESTRICT,
@@ -153,8 +161,11 @@ CREATE TABLE metro_trips (
     origin_station_id       VARCHAR(10) NOT NULL REFERENCES metro_stations(station_id) ON DELETE RESTRICT,
     destination_station_id  VARCHAR(10) NOT NULL REFERENCES metro_stations(station_id) ON DELETE RESTRICT,
     travel_date             DATE NOT NULL,
-    ticket_type             VARCHAR(20) NOT NULL CHECK (ticket_type IN ('single', 'day_pass')),
+    -- 允許使用 monthly_pass 作為票種
+    ticket_type             VARCHAR(20) NOT NULL CHECK (ticket_type IN ('single', 'day_pass', 'monthly_pass')),
     day_pass_ref            VARCHAR(20) REFERENCES metro_trips(trip_id) ON DELETE SET NULL,
+    -- 如果這趟旅程是用月票搭的，就指向該張月票
+    monthly_pass_ref        VARCHAR(20) REFERENCES metro_monthly_passes(pass_id) ON DELETE SET NULL,
     stops_travelled         INTEGER CHECK (stops_travelled IS NULL OR stops_travelled >= 0),
     amount_usd              NUMERIC(10,2) NOT NULL CHECK (amount_usd >= 0),
     status                  VARCHAR(20) NOT NULL CHECK (status IN ('completed', 'cancelled')),
@@ -255,6 +266,7 @@ CREATE INDEX IF NOT EXISTS idx_national_rail_feedback_booking_id ON national_rai
 CREATE INDEX IF NOT EXISTS idx_national_rail_feedback_user_id ON national_rail_feedback(user_id);
 CREATE INDEX IF NOT EXISTS idx_metro_feedback_trip_id ON metro_feedback(trip_id);
 CREATE INDEX IF NOT EXISTS idx_metro_feedback_user_id ON metro_feedback(user_id);
+CREATE INDEX IF NOT EXISTS idx_metro_monthly_passes_user ON metro_monthly_passes(user_id);
 
 
 -- ============================================================
