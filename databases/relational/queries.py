@@ -316,7 +316,32 @@ def query_national_rail_fare(
         "total_fare_usd": total,
     }
 
+def query_national_rail_platform(schedule_id: str, station_id: str) -> dict:
+    sql = """
+        SELECT
+            np.platform_id,
+            np.schedule_id,
+            np.station_id,
+            s.name AS station_name,
+            np.direction,
+            np.platform_number
+        FROM national_rail_platforms np
+        JOIN national_rail_stations s
+          ON s.station_id = np.station_id
+        WHERE np.schedule_id = %s
+          AND np.station_id = %s;
+    """
 
+    with _connect() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(sql, (schedule_id, station_id))
+            row = cur.fetchone()
+
+            if not row:
+                return {"found": False}
+
+            return dict(row)
+        
 # ── METRO SCHEDULES & FARE ────────────────────────────────────────────────────
 
 def query_metro_schedules(origin_id: str, destination_id: str) -> list[dict]:
@@ -390,7 +415,32 @@ def query_metro_fare(schedule_id: str, stops_travelled: int) -> Optional[dict]:
         "total_fare_usd": total,
     }
 
+def query_metro_platform(schedule_id: str, station_id: str) -> dict:
+    sql = """
+        SELECT
+            mp.platform_id,
+            mp.schedule_id,
+            mp.station_id,
+            s.name AS station_name,
+            mp.direction,
+            mp.platform_number
+        FROM metro_platforms mp
+        JOIN metro_stations s
+          ON s.station_id = mp.station_id
+        WHERE mp.schedule_id = %s
+          AND mp.station_id = %s;
+    """
 
+    with _connect() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(sql, (schedule_id, station_id))
+            row = cur.fetchone()
+
+            if not row:
+                return {"found": False}
+
+            return dict(row)
+        
 # ── SEAT SELECTION ────────────────────────────────────────────────────────────
 
 def query_available_seats(
@@ -890,8 +940,21 @@ def execute_booking(
             )
             payment = dict(cur.fetchone())
 
+            points_earned = int(float(payment["amount_usd"]) * 10)
+
+            cur.execute(
+                """
+                UPDATE registered_users
+                SET loyalty_points = loyalty_points + %s
+                WHERE user_id = %s
+                RETURNING loyalty_points;
+                """,
+                (points_earned, user_id),
+            )
+
+            current_loyalty_points = cur.fetchone()["loyalty_points"]
             conn.commit()
-            return True, {"booking": booking, "payment": payment}
+            return True, {"booking": booking, "payment": payment , "loyalty_points": current_loyalty_points}
 
     except Exception as e:
         conn.rollback()

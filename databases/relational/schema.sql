@@ -26,6 +26,8 @@ DROP TABLE IF EXISTS metro_schedules CASCADE;
 DROP TABLE IF EXISTS national_rail_schedules CASCADE;
 DROP TABLE IF EXISTS metro_stations CASCADE;
 DROP TABLE IF EXISTS national_rail_stations CASCADE;
+DROP TABLE IF EXISTS national_rail_platforms CASCADE;
+DROP TABLE IF EXISTS metro_platforms CASCADE;
 DROP TABLE IF EXISTS registered_users CASCADE;
 DROP TABLE IF EXISTS policy_documents CASCADE;
 
@@ -37,15 +39,14 @@ CREATE TABLE registered_users (
     user_id          VARCHAR(10)  PRIMARY KEY,
     full_name        VARCHAR(200) NOT NULL,
     email            VARCHAR(255) NOT NULL UNIQUE,
-    -- JSON source uses "password", but seed_postgres.py should hash it first.
-    -- Store only Argon2id hashes, never plain text passwords.
     password_hash    VARCHAR(255) NOT NULL CHECK (password_hash LIKE '$argon2id$%'),
     phone            VARCHAR(20),
     date_of_birth    DATE NOT NULL,
     secret_question  VARCHAR(255),
     secret_answer    VARCHAR(255) ,
     registered_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    is_active        BOOLEAN NOT NULL DEFAULT TRUE
+    is_active        BOOLEAN NOT NULL DEFAULT TRUE,
+    loyalty_points INTEGER NOT NULL DEFAULT 0 CHECK (loyalty_points >= 0)
 );
 
 -- National rail stations. Arrays / nested route-neighbour data are kept as JSONB
@@ -120,9 +121,50 @@ CREATE TABLE national_rail_seats (
     seat_column   VARCHAR(5) NOT NULL,
     PRIMARY KEY (schedule_id, seat_id)
 );
-
 -- ============================================================
--- 3. Transaction tables
+-- 3. platform
+-- ============================================================
+CREATE TABLE national_rail_platforms (
+    platform_id VARCHAR(40) PRIMARY KEY,
+
+    schedule_id VARCHAR(20) NOT NULL
+        REFERENCES national_rail_schedules(schedule_id)
+        ON DELETE CASCADE,
+
+    station_id VARCHAR(10) NOT NULL
+        REFERENCES national_rail_stations(station_id)
+        ON DELETE RESTRICT,
+
+    direction VARCHAR(20) NOT NULL
+        CHECK (direction IN ('northbound', 'southbound', 'eastbound', 'westbound')),
+
+    platform_number INTEGER NOT NULL
+        CHECK (platform_number BETWEEN 1 AND 4),
+
+    UNIQUE (schedule_id, station_id)
+);
+
+CREATE TABLE metro_platforms (
+    platform_id VARCHAR(40) PRIMARY KEY,
+
+    schedule_id VARCHAR(20) NOT NULL
+        REFERENCES metro_schedules(schedule_id)
+        ON DELETE CASCADE,
+
+    station_id VARCHAR(10) NOT NULL
+        REFERENCES metro_stations(station_id)
+        ON DELETE RESTRICT,
+
+    direction VARCHAR(20) NOT NULL
+        CHECK (direction IN ('northbound', 'southbound', 'eastbound', 'westbound')),
+
+    platform_number INTEGER NOT NULL
+        CHECK (platform_number BETWEEN 1 AND 4),
+
+    UNIQUE (schedule_id, station_id)
+);
+-- ============================================================
+-- 4. Transaction tables
 -- ============================================================
 
 CREATE TABLE national_rail_bookings (
@@ -174,7 +216,7 @@ CREATE TABLE metro_trips (
 );
 
 -- ============================================================
--- 4. Split payment and feedback tables, matching the ERD
+-- 5. Split payment and feedback tables, matching the ERD
 -- ============================================================
 -- The original payments / feedback JSON uses a field named "booking_id" for both
 -- national rail bookings (BKxxx) and metro trips (MTxxx).
@@ -219,7 +261,7 @@ CREATE TABLE metro_feedback (
 );
 
 -- ============================================================
--- 5. Indexes
+-- 6. Indexes
 -- ============================================================
 
 CREATE INDEX IF NOT EXISTS idx_national_rail_stations_lines_gin ON national_rail_stations USING GIN (lines);
@@ -268,9 +310,13 @@ CREATE INDEX IF NOT EXISTS idx_metro_feedback_trip_id ON metro_feedback(trip_id)
 CREATE INDEX IF NOT EXISTS idx_metro_feedback_user_id ON metro_feedback(user_id);
 CREATE INDEX IF NOT EXISTS idx_metro_monthly_passes_user ON metro_monthly_passes(user_id);
 
-
+--Helps platform lookup  that show which platforms serve a given station/line/direction.
+CREATE INDEX IF NOT EXISTS idx_national_rail_platforms_schedule_station
+ON national_rail_platforms(schedule_id, station_id);
+CREATE INDEX IF NOT EXISTS idx_metro_platforms_schedule_station
+ON metro_platforms(schedule_id, station_id);
 -- ============================================================
--- 6. Available seats function
+-- 7. Available seats function
 -- ============================================================
 -- Calculates available seats dynamically from:
 --   national_rail_seats - confirmed/completed national_rail_bookings
@@ -316,7 +362,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- ============================================================
--- 7. VECTOR SCHEMA  (RAG / Help Desk)do not modify
+-- 8. VECTOR SCHEMA  (RAG / Help Desk)do not modify
 -- ============================================================
 
 CREATE EXTENSION IF NOT EXISTS vector;

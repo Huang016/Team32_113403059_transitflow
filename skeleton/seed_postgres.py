@@ -126,6 +126,23 @@ def require_prefix(value: str | None, allowed_prefixes: tuple[str, ...], source:
     return value
 
 
+def get_platform_number_by_direction(direction: str | None) -> int:
+    direction = (direction or "").lower()
+
+    if direction == "northbound":
+        return 1
+
+    if direction == "southbound":
+        return 2
+
+    if direction == "eastbound":
+        return 3
+
+    if direction == "westbound":
+        return 4
+
+    return 1
+
 # ── seeders ──────────────────────────────────────────────────────────────────
 
 def seed_metro_stations(cur) -> int:
@@ -236,6 +253,38 @@ def seed_metro_schedules(cur) -> int:
     print(f"  metro_schedules: {count}")
     return count
 
+def seed_metro_platforms(cur) -> int:
+    data = load("metro_schedules.json")
+
+    columns = [
+        "platform_id",
+        "schedule_id",
+        "station_id",
+        "direction",
+        "platform_number",
+    ]
+
+    rows = []
+
+    for schedule in data:
+        schedule_id = schedule.get("schedule_id")
+        direction = schedule.get("direction")
+        platform_number = get_platform_number_by_direction(direction)
+
+        for station_id in schedule.get("stops_in_order", []):
+            rows.append(
+                (
+                    f"MP_{schedule_id}_{station_id}",
+                    schedule_id,
+                    station_id,
+                    direction,
+                    platform_number,
+                )
+            )
+
+    count = insert_many(cur, "metro_platforms", columns, rows)
+    print(f"  metro_platforms: {count}")
+    return count
 
 def seed_national_rail_schedules(cur) -> int:
     data = load("national_rail_schedules.json")
@@ -279,6 +328,38 @@ def seed_national_rail_schedules(cur) -> int:
     print(f"  national_rail_schedules: {count}")
     return count
 
+def seed_national_rail_platforms(cur) -> int:
+    data = load("national_rail_schedules.json")
+
+    columns = [
+        "platform_id",
+        "schedule_id",
+        "station_id",
+        "direction",
+        "platform_number",
+    ]
+
+    rows = []
+
+    for schedule in data:
+        schedule_id = schedule.get("schedule_id")
+        direction = schedule.get("direction")
+        platform_number = get_platform_number_by_direction(direction)
+
+        for station_id in schedule.get("stops_in_order", []):
+            rows.append(
+                (
+                    f"NRP_{schedule_id}_{station_id}",
+                    schedule_id,
+                    station_id,
+                    direction,
+                    platform_number,
+                )
+            )
+
+    count = insert_many(cur, "national_rail_platforms", columns, rows)
+    print(f"  national_rail_platforms: {count}")
+    return count
 
 def seed_national_rail_seats(cur) -> int:
     """Flatten national_rail_seat_layouts.json into national_rail_seats."""
@@ -314,6 +395,7 @@ def seed_national_rail_seats(cur) -> int:
     count = insert_many(cur, "national_rail_seats", columns, rows)
     print(f"  national_rail_seats: {count}")
     return count
+
 
 
 def seed_users(cur) -> int:
@@ -503,6 +585,24 @@ def seed_payments(cur) -> int:
 
     return rail_count + metro_count
 
+def update_loyalty_points(cur) -> None:
+    cur.execute("""
+        UPDATE registered_users u
+        SET loyalty_points = COALESCE(p.points, 0)
+        FROM (
+            SELECT
+                b.user_id,
+                SUM(FLOOR(np.amount_usd * 10))::int AS points
+            FROM national_rail_bookings b
+            JOIN national_rail_payments np
+              ON np.booking_id = b.booking_id
+            WHERE b.status IN ('confirmed', 'completed')
+              AND np.status = 'paid'
+            GROUP BY b.user_id
+        ) p
+        WHERE u.user_id = p.user_id;
+    """)
+    print("  loyalty_points updated")
 
 def seed_feedback(cur) -> int:
     """
@@ -571,6 +671,8 @@ def print_summary(cur) -> None:
         "metro_stations",
         "national_rail_schedules",
         "metro_schedules",
+        "metro_platforms",
+        "national_rail_platforms",
         "national_rail_seats",
         "national_rail_bookings",
         "metro_trips",
@@ -578,6 +680,7 @@ def print_summary(cur) -> None:
         "metro_payments",
         "national_rail_feedback",
         "metro_feedback",
+        
     ]
 
     print("\nCurrent table counts:")
@@ -601,10 +704,11 @@ def main() -> None:
         # 1. Independent station/user-ish master data
         seed_metro_stations(cur)
         seed_national_rail_stations(cur)
-
-        # 2. Schedules, then flattened seats
+        # 2. Schedules, platform, and seats then flattened seats
         seed_metro_schedules(cur)
         seed_national_rail_schedules(cur)
+        seed_metro_platforms(cur)
+        seed_national_rail_platforms(cur)
         seed_national_rail_seats(cur)
 
         # 3. Users and transactions
@@ -615,7 +719,7 @@ def main() -> None:
         # 4. Split payments and feedback
         seed_payments(cur)
         seed_feedback(cur)
-
+        update_loyalty_points(cur)
         print_summary(cur)
 
         conn.commit()
