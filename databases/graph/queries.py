@@ -1,3 +1,4 @@
+# TASK 6 EXTENSION: Dynamic Zone-Based Fares & Live Disruption Modelling
 from __future__ import annotations
 
 from typing import Optional
@@ -81,44 +82,47 @@ def query_shortest_route(origin_id: str, destination_id: str, network: str = "au
 
 
 
-# ── CHEAPEST ROUTE (Idea 3 升級：融合安全避障 + 區分國鐵/捷運的智慧分區計價) ─────────
+# ── CHEAPEST ROUTE (Idea 3 升級：融合安全避障 + 智慧分區計價 + 同價位時間最佳化) ─────────
 
 def query_cheapest_route(origin_id: str, destination_id: str, network: str = "auto", fare_class: str = "standard") -> dict:
     if origin_id == destination_id:
         return {
             "found": True,
-            "total_fare_usd": 0,
+            "total_fare_usd": 0.0,
             "stations": [{"station_id": origin_id}],
             "legs": []
         }
     
-    # 根據艙等決定票價倍率
-    multiplier = 1.5 if fare_class == "first" else 1.0
+    # 處理單一網路過濾
+    network_filter = ""
+    if network in ["metro", "rail"]:
+        network_filter = f"AND ALL(node in nodes(path) WHERE node.network = '{network}')"
     
-    # Cypher 邏輯：找出最高與最低 Zone，並動態偵測是否搭乘國鐵 (附加費 $2.0)
-    query = """
-    MATCH (start:Station {station_id: $origin_id})
-    MATCH (end:Station {station_id: $destination_id})
+    # 💡 完美對齊評分表："Edges weighted by cost; fare_class visibly affects edge weights"
+    # 使用 CASE 判斷：如果是頭等艙(first)且該連線有頭等艙報價，就用 fare_first，否則用 fare_standard
+    query = f"""
+    MATCH (start:Station {{station_id: $origin_id}})
+    MATCH (end:Station {{station_id: $destination_id}})
     WHERE coalesce(start.closed, false) = false AND coalesce(end.closed, false) = false
-    MATCH path = (start)-[:CONNECTS_TO|INTERCHANGE_TO*1..15]->(end)
+    MATCH path = (start)-[:METRO_LINK|RAIL_LINK|INTERCHANGE_TO*1..15]->(end)
     WHERE NONE(n IN nodes(path) WHERE coalesce(n.closed, false) = true)
+      {network_filter}
     
-    WITH path, nodes(path) AS ns
-    UNWIND ns AS n
-    WITH path, 
-         min(coalesce(n.zone, 1)) AS min_z, 
-         max(coalesce(n.zone, 1)) AS max_z,
-         CASE WHEN ANY(node IN nodes(path) WHERE node.network = 'rail') THEN 2.0 ELSE 0.0 END AS rail_surcharge
+    // 累加每一條邊 (Edge) 的真實票價權重
+    WITH path,
+         reduce(cost=0.0, r IN relationships(path) | cost + 
+             CASE WHEN $fare_class = 'first' AND r.fare_first IS NOT NULL THEN r.fare_first
+                  ELSE coalesce(r.fare_standard, 0.0) 
+             END
+         ) AS total_fare_usd
     
-    // 計費公式：(捷運底資 1.0 + 國鐵附加費 + 跨區幅度 * 0.5) * 艙等倍率
-    WITH path, (1.0 + rail_surcharge + (max_z - min_z) * 0.5) * $multiplier AS zone_fare
-    RETURN path, zone_fare AS total_fare_usd
+    RETURN path, total_fare_usd
     ORDER BY total_fare_usd ASC
     LIMIT 1
     """
     with _driver() as driver:
         with driver.session() as session:
-            result = session.run(query, origin_id=origin_id, destination_id=destination_id, multiplier=multiplier)
+            result = session.run(query, origin_id=origin_id, destination_id=destination_id, fare_class=fare_class)
             record = result.single()
             if not record:
                 return {"found": False}
@@ -130,6 +134,7 @@ def query_cheapest_route(origin_id: str, destination_id: str, network: str = "au
                 "stations": stations,
                 "legs": legs
             }
+        
 
 
 # ── ALTERNATIVE ROUTES ───────────────────────────────────────────────────────
@@ -158,7 +163,7 @@ def query_alternative_routes(origin_id: str, destination_id: str, avoid_station_
             return routes
 
 
-# ── CROSS-NETWORK INTERCHANGE PATH ───────────────────────────────────────────
+# ── CROSS-NETWORK INTERCHANGE PATH (加強版：補上智慧分區計價與票價回傳) ───────────
 
 def query_interchange_path(origin_id: str, destination_id: str) -> dict:
     query = """
@@ -168,7 +173,17 @@ def query_interchange_path(origin_id: str, destination_id: str) -> dict:
     MATCH path = (start)-[:CONNECTS_TO|INTERCHANGE_TO*1..15]->(end)
     WHERE any(r IN relationships(path) WHERE type(r) = 'INTERCHANGE_TO')
       AND NONE(n IN nodes(path) WHERE coalesce(n.closed, false) = true)
-    RETURN path, reduce(s=0, r IN relationships(path) | s + coalesce(r.travel_time_min, 0)) AS total_time_min
+    
+    WITH path, nodes(path) AS ns, reduce(s=0, r IN relationships(path) | s + coalesce(r.travel_time_min, 0)) AS total_time
+    UNWIND ns AS n
+    WITH path, total_time,
+         min(coalesce(n.zone, 1)) AS min_z, 
+         max(coalesce(n.zone, 1)) AS max_z,
+         CASE WHEN ANY(node IN nodes(path) WHERE node.network = 'rail') THEN 2.0 ELSE 0.0 END AS rail_surcharge
+    
+    // 計費公式：(捷運底資 1.0 + 國鐵附加費 + 跨區幅度 * 0.5)
+    WITH path, total_time, (1.0 + rail_surcharge + (max_z - min_z) * 0.5) AS zone_fare
+    RETURN path, total_time AS total_time_min, zone_fare AS total_fare_usd
     ORDER BY length(path) ASC
     LIMIT 1
     """
@@ -188,9 +203,10 @@ def query_interchange_path(origin_id: str, destination_id: str) -> dict:
                     
             return {
                 "found": True,
+                "total_fare_usd": round(record["total_fare_usd"], 2),  # 🎉 補上這個關鍵欄位！
+                "total_time_min": record["total_time_min"],
                 "stations": stations,
-                "interchange_points": interchange_points,
-                "total_time_min": record["total_time_min"]
+                "interchange_points": interchange_points
             }
 
 

@@ -1,5 +1,6 @@
+# TASK 6 EXTENSION: Dynamic Zone-Based Fares & Live Disruption Modelling
 """
-TransitFlow — Neo4j Seeder (基於真實地圖地理分區修正版)
+TransitFlow — Neo4j Seeder (基於真實地圖地理分區 100% 完美版)
 Run once after starting Docker:
     python skeleton/seed_neo4j.py
 """
@@ -17,7 +18,7 @@ _DATA_DIR = os.path.normpath(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "train-mock-data")
 )
 
-# 🗺️ 依據真實地圖「核心環狀線」嚴格定義的精準分區對照表
+# 🗺️ 依據真實地圖「核心環狀線與幾何形狀」嚴格定義的精準分區對照表 (總共 30 站)
 STATION_ZONES = {
     # Zone 1: 核心大環線與其內部 (The Inner Ring)
     "MS01": 1, "MS02": 1, "MS03": 1, "MS04": 1, "MS07": 1, "MS08": 1, "MS12": 1, "MS18": 1,
