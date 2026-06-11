@@ -7,8 +7,6 @@
 --   3) Only password_hash is hashed. secret_answer is intentionally plain text
 --      because the current requirement says only passwords need hashing.
 --   4) Schedule stops are normalized into stop junction tables with stop_order.
---   5) The assignment scaffold provides policy_documents and HNSW index, so this
---      file does NOT create policy_documents or any vector index.
 --
 
 -- Delete strategy:
@@ -26,6 +24,7 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 -- ============================================================
 DROP TABLE IF EXISTS metro_feedback CASCADE;
 DROP TABLE IF EXISTS national_rail_feedback CASCADE;
+DROP TABLE IF EXISTS metro_monthly_pass_payments CASCADE;
 DROP TABLE IF EXISTS metro_payments CASCADE;
 DROP TABLE IF EXISTS national_rail_payments CASCADE;
 DROP TABLE IF EXISTS metro_trips CASCADE;
@@ -50,7 +49,6 @@ CREATE TABLE registered_users (
     -- PK uses UUID because users are core application entities created by the system;
     -- UUID avoids exposing sequential user counts and still works across distributed systems.
     user_id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-
     -- Original source JSON ID, e.g. U001. Kept for import/demo lookup, not used as PK.
     user_code        VARCHAR(20) NOT NULL UNIQUE,
 
@@ -78,8 +76,7 @@ CREATE TABLE national_rail_stations (
     interchange_national_rail_lines  JSONB NOT NULL DEFAULT '[]'::jsonb,
     is_interchange_metro             BOOLEAN NOT NULL DEFAULT FALSE,
 
-    -- Stored as source code to avoid circular FK load dependency between rail and metro stations.
-    interchange_metro_station_code   VARCHAR(20),
+    interchange_metro_station_code   VARCHAR(20),-- Stored as source code to avoid circular FK load dependency between rail and metro stations.
     adjacent_stations                JSONB NOT NULL DEFAULT '[]'::jsonb
 );
 
@@ -289,6 +286,23 @@ CREATE TABLE metro_payments (
     status       VARCHAR(20) NOT NULL CHECK (status IN ('paid', 'refunded')),
     paid_at      TIMESTAMPTZ NOT NULL
 );
+
+
+CREATE TABLE metro_monthly_pass_payments (
+    -- PK uses UUID because monthly pass payments are financial transactions
+    -- and should not expose sequential counts.
+    payment_id   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    payment_code VARCHAR(30) NOT NULL UNIQUE,
+
+    pass_id      UUID NOT NULL REFERENCES metro_monthly_passes(pass_id) ON DELETE RESTRICT,
+    amount_usd   NUMERIC(10,2) NOT NULL CHECK (amount_usd >= 0),
+    method       VARCHAR(50) NOT NULL CHECK (method IN ('credit_card', 'debit_card', 'ewallet')),
+    status       VARCHAR(20) NOT NULL CHECK (status IN ('paid', 'refunded')),
+    paid_at      TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_metro_monthly_pass_payments_pass_id
+ON metro_monthly_pass_payments(pass_id);
 
 CREATE TABLE national_rail_feedback (
     -- PK uses UUID because feedback is user-generated business data;
