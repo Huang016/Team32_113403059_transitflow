@@ -17,7 +17,7 @@ Run AFTER:
     psql ... -f databases/relational/schema.sql
 
     ============================================================
-💡 NEWLY ADDED EXTENSION FEATURE 1: Platform Assignment System
+NEWLY ADDED EXTENSION FEATURE 1: Platform Assignment System
 ============================================================
 Functionality & Seeding Implementation:
   - The script dynamically generates physical platform records during database initialization.
@@ -27,7 +27,7 @@ Functionality & Seeding Implementation:
     using `require_mapping` before inserting them into the platform tables.
 
 ============================================================
-💡 NEWLY ADDED EXTENSION FEATURE 2: Monthly Commuter Pass System
+ NEWLY ADDED EXTENSION FEATURE 2: Monthly Commuter Pass System
 ============================================================
 Functionality & Seeding Implementation:
   - Introduces conditional data loading via `load_optional` for `metro_monthly_passes.json` 
@@ -39,7 +39,7 @@ Functionality & Seeding Implementation:
     ensure users are correctly awarded loyalty points (amount_usd * 10) for their monthly 
     pass subscriptions, not just single tickets.
     ============================================================
-💡 NEWLY ADDED EXTENSION FEATURE 3: Customer Loyalty & Rewards System
+NEWLY ADDED EXTENSION FEATURE 3: Customer Loyalty & Rewards System
 ============================================================
 Functionality & Seeding Implementation:
   - The `update_loyalty_points` function acts as an aggregation reconciliation tool.
