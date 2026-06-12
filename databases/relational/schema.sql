@@ -17,7 +17,7 @@
 -- ============================================================
 -- Needed for gen_random_uuid().
 
-============================================================
+--============================================================
 -- 💡 NEWLY ADDED EXTENSION FEATURE 1: Platform Assignment System
 -- ============================================================
 -- Functionality & System Role:
@@ -45,7 +45,7 @@
 --   into 'metro_trips' via 'monthly_pass_ref'. This allows the system to bypass standard 
 --   fare calculations during tap-in audits if a valid pass exists, while fully tracking 
 --   passenger flow and ride histories.
-============================================================
+--============================================================
 -- 💡 NEWLY ADDED EXTENSION FEATURE 3: Customer Loyalty & Rewards System
 -- ============================================================
 -- Functionality & System Role:
