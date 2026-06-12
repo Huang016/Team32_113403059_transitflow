@@ -15,6 +15,38 @@ Usage:
 Run AFTER:
     docker compose up -d
     psql ... -f databases/relational/schema.sql
+
+    ============================================================
+💡 NEWLY ADDED EXTENSION FEATURE 1: Platform Assignment System
+============================================================
+Functionality & Seeding Implementation:
+  - The script dynamically generates physical platform records during database initialization.
+  - Functions `seed_metro_platforms` and `seed_national_rail_platforms` iterate through 
+    the loaded schedules and invoke the deterministic helper `get_platform_number_by_direction`.
+  - It resolves JSON string references (e.g., station_code) into real SERIAL database IDs 
+    using `require_mapping` before inserting them into the platform tables.
+
+============================================================
+💡 NEWLY ADDED EXTENSION FEATURE 2: Monthly Commuter Pass System
+============================================================
+Functionality & Seeding Implementation:
+  - Introduces conditional data loading via `load_optional` for `metro_monthly_passes.json` 
+    and `metro_monthly_pass_payments.json`. This ensures backward compatibility if the mock 
+    data files do not exist.
+  - In `seed_metro_trips`, the script accurately parses `monthly_pass_ref` from trip records 
+    and links them to the newly generated UUIDs of the seeded monthly passes.
+  - The `update_loyalty_points` function has been upgraded with a `UNION ALL` block to 
+    ensure users are correctly awarded loyalty points (amount_usd * 10) for their monthly 
+    pass subscriptions, not just single tickets.
+    ============================================================
+💡 NEWLY ADDED EXTENSION FEATURE 3: Customer Loyalty & Rewards System
+============================================================
+Functionality & Seeding Implementation:
+  - The `update_loyalty_points` function acts as an aggregation reconciliation tool.
+  - It uses a complex `UNION ALL` subquery across three different revenue streams 
+    (rail bookings, metro trips, and monthly passes) to recalculate the exact point 
+    balances for all mock users, ensuring the seeded database reflects a mathematically 
+    accurate financial state.
 """
 
 from __future__ import annotations

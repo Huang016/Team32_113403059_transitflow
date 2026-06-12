@@ -21,9 +21,41 @@ Important rubric points:
     only after both succeed.
   - Unknown user/email/booking lookups return None / (False, message) rather
     than raising normal application errors.
+
+    ============================================================
+💡 NEWLY ADDED EXTENSION FEATURE 1: Platform Assignment System
+============================================================
+Functionality & Python Implementation:
+  - Provides dynamic querying of physical platforms via `query_national_rail_platform` 
+    and `query_metro_platform`.
+  - These functions perform robust multi-table JOINs across schedules, stations, and platform 
+    assignment tables to return precise boarding locations (platform_number & direction) 
+    for the AI assistant and frontend UI to consume.
+
+============================================================
+💡 NEWLY ADDED EXTENSION FEATURE 2: Monthly Commuter Pass System
+============================================================
+Functionality & Python Implementation:
+  - Introduces subscription-based purchasing logic via `execute_buy_monthly_pass`.
+  - Strict ACID compliance (ACID 交易安全): The generation of the monthly pass (`metro_monthly_passes`), 
+    the payment record (`metro_monthly_pass_payments`), and the loyalty points update 
+    are bundled into a single transaction block. If any step fails, the entire 
+    operation is rolled back (conn.rollback()) to prevent financial data corruption.
+  - `query_active_monthly_pass` allows instant verification of pass validity using 
+    CURRENT_DATE bounding.
+  - `query_user_bookings` has been upgraded to perform LEFT JOINs on pass references 
+    to present a unified trip history.
+    ============================================================
+💡 NEWLY ADDED EXTENSION FEATURE 3: Customer Loyalty & Rewards System
+============================================================
+Functionality & Python Implementation:
+  - Loyalty points are dynamically calculated based on the transaction amount (1 USD = 10 points).
+  - The points are atomically appended to the user's account inside the same `try...except` 
+    transaction block as the booking and payment inserts. 
+  - Using `RETURNING loyalty_points`, the updated balance is instantly fetched and returned 
+    to the frontend without requiring a secondary SELECT query.
 """
 
-from __future__ import annotations
 
 import hashlib
 import random

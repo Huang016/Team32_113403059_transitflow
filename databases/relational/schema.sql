@@ -15,8 +15,44 @@
 --   without their parent schedule, such as stops, seats and platform assignments,
 --   use ON DELETE CASCADE.
 -- ============================================================
-
 -- Needed for gen_random_uuid().
+
+============================================================
+-- 💡 NEWLY ADDED EXTENSION FEATURE 1: Platform Assignment System
+-- ============================================================
+-- Functionality & System Role:
+--   This system introduces physical track-level routing to the transport network.
+--   In real-world transit, knowing a schedule and a station is insufficient; 
+--   passengers must be guided to a specific physical platform.
+-- 
+--   The platform assignment tables ('national_rail_platforms' and 'metro_platforms')
+--   serve as a crucial operational layer linking 'Schedules' and 'Stations'. 
+--   By mapping a composite unique relation (schedule_id, station_id), the system
+--   dynamically assigns a platform number (1 to 4) and tracks the physical direction 
+--   of the service run at that exact node. This empowers the AI assistant and 
+--   the frontend UI to provide precise platform-level boarding instructions.
+--
+-- ============================================================
+-- 💡 NEWLY ADDED EXTENSION FEATURE 2: Monthly Commuter Pass System
+-- ============================================================
+-- Functionality & System Role:
+--   This system introduces a financial subscription model for high-frequency metro commuters.
+--   Instead of stops-based single fares, users can purchase a flat-rate 30-day pass ($75.00) 
+--   for unlimited journeys across all metro lines (M1-M4).
+-- 
+--   The 'metro_monthly_passes' table records active subscriptions with absolute time bounds 
+--   ('valid_from' and 'valid_until'). It links directly to 'registered_users' and maps 
+--   into 'metro_trips' via 'monthly_pass_ref'. This allows the system to bypass standard 
+--   fare calculations during tap-in audits if a valid pass exists, while fully tracking 
+--   passenger flow and ride histories.
+============================================================
+-- 💡 NEWLY ADDED EXTENSION FEATURE 3: Customer Loyalty & Rewards System
+-- ============================================================
+-- Functionality & System Role:
+--   To incentivize frequent travel, users accumulate loyalty points for every purchase.
+--   The 'loyalty_points' column in 'registered_users' acts as a real-time ledger balance.
+--   It is protected by a CHECK constraint (>= 0) to prevent negative balances at the DB level,
+--   ensuring strict data integrity without solely relying on Python validation.
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 -- ============================================================
