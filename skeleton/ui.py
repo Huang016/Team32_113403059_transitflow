@@ -15,6 +15,26 @@ Then open: http://localhost:7860
 
 Students: You do NOT need to change this file. (But we upgraded it!)
 """
+"""
+TransitFlow — Gradio Web Interface
+====================================
+【新增功能與修改說明註記】
+
+1. 新增功能：
+   - 使用者歷史行程查詢 (Trip History)：當使用者成功登入或註冊後，右上角控制區會動態顯示「📜 Trip History」按鈕。點擊後會直接調用後端 PostgreSQL 的 DDL/SQL 資料流，撈取該登入帳號專屬的國鐵 (National Rail) 訂票與捷運 (Metro) 搭乘紀錄。
+   - 獨立歷史紀錄面板：在主聊天視窗上方新增一個獨立的 `history_panel` 控制區塊，內建 `gr.JSON()` 元件。撈取出來的巢狀行程歷史資料會以高度視覺化的「樹狀可折疊結構」呈現在網頁上，並附帶「Close History」按鈕供隨時關閉收合。
+
+2. 修改項目：
+   - 後端查詢整合：於檔案開頭匯入 `databases.relational.queries` 中的關聯式資料庫歷史查詢核心函式 `query_user_bookings`。
+   - 驗證狀態機連動：全面重構 `do_login()`、`do_logout()` 與 `do_register()` 的回傳元組 (Tuple) 架構，將「歷史紀錄按鈕」與「歷史紀錄面板」的顯示狀態 (visible) 強制與使用者登入狀態綁定（未登入或登出時，按鈕與面板皆會自動強制隱藏）。
+   - 前端元件佈局與排版：將右上角的 `Gradio Column` 稍微加寬至 320px，並使用 `gr.Row()` 讓「📜 Trip History」按鈕與原有的「Logout」按鈕能完美並排對齊。
+   - 事件驅動網路更新 (Event Wiring)：在 Blocks 底部新增 `view_history_btn.click` 與 `close_history_btn.click` 的事件處理邏輯，並同步更新所有驗證按鈕觸發時的 `outputs` 元件清單數量與對應關係。
+====================================
+Run with:  python skeleton/ui.py
+Then open: http://localhost:7860
+
+Students: You do NOT need to change this file. (But we upgraded it for the mission!)
+"""
 
 import sys
 sys.path.insert(0, ".")
